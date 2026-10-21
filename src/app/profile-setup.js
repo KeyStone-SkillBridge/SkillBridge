@@ -19,10 +19,10 @@ import LogoSvg from "../../assets/images/logo.svg";
 const EXPERIENCE_OPTIONS = ["0–1 yrs", "1–3 yrs", "3–5 yrs", "5+ yrs"];
 const STATUS_OPTIONS = [
   "Recent Graduate",
-  "Undergraduate Student",
-  "Entry-Level Professional",
-  "Mid-Level Professional",
-  "Career Switcher",
+  "Undergraduate",
+  "Early Career Professional",
+  "Job Seeker",
+  "Career Transitioner",
 ];
 
 export default function ProfileSetupScreen() {

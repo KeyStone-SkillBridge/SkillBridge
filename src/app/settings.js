@@ -19,8 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function SettingsScreen() {
   const router = useRouter();
 
-  // Modal Visibility States
-  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  // Delete Modal State
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
 
@@ -31,12 +30,6 @@ export default function SettingsScreen() {
   // Security & Privacy Toggles
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
   const [recruiterNetwork, setRecruiterNetwork] = useState(true);
-
-  const confirmLogout = async () => {
-    setLogoutModalVisible(false);
-    // Keep 'already_onboarded' = 'true' so returning user hits /login
-    router.replace("/login");
-  };
 
   const confirmDeleteAccount = async () => {
     if (!deletePassword.trim()) {
@@ -230,50 +223,15 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Log out trigger button */}
+        {/* Log out trigger button -> routes to /logout-confirm */}
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={() => setLogoutModalVisible(true)}
+          onPress={() => router.push("/logout-confirm")}
           activeOpacity={0.85}
         >
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
-
-      {/* ================= Logout Confirmation Modal ================= */}
-      <Modal
-        visible={logoutModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLogoutModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Log out?</Text>
-            <Text style={styles.modalSubtitle}>
-              Are you sure you want to Log out??
-            </Text>
-
-            <View style={styles.modalActionRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setLogoutModalVisible(false)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalLogoutBtn}
-                onPress={confirmLogout}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalLogoutText}>Log Out</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* ================= Delete Account Confirmation Modal ================= */}
       <Modal
@@ -469,7 +427,7 @@ const styles = StyleSheet.create({
     color: "#D32F2F",
   },
 
-  /* Common Modal Styles */
+  /* Delete Modal Styles */
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.45)",
@@ -498,12 +456,6 @@ const styles = StyleSheet.create({
     color: "#1C101B",
     marginBottom: 12,
   },
-  modalSubtitle: {
-    fontSize: 14,
-    color: "#4B3F4B",
-    lineHeight: 20,
-    marginBottom: 20,
-  },
   modalActionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -524,21 +476,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#7A1380",
   },
-  modalLogoutBtn: {
-    flex: 1,
-    height: 44,
-    borderRadius: 8,
-    backgroundColor: "#A81313",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalLogoutText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-
-  /* Delete Account Modal Elements */
   deleteWarningBanner: {
     backgroundColor: "#F8D7DA",
     borderRadius: 6,

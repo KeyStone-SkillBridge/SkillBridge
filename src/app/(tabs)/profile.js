@@ -481,12 +481,7 @@ export default function ProfileScreen() {
           <TouchableOpacity
             style={styles.upgradeCtaBtn}
             activeOpacity={0.85}
-            onPress={() =>
-              Alert.alert(
-                "Pathfinder Pro",
-                "Routing to Paystack / Flutterwave checkout gateway...",
-              )
-            }
+            onPress={() => router.push("/upgrade")}
           >
             <Text style={styles.upgradeCtaText}>
               Upgrade via Paystack / Flutterwave

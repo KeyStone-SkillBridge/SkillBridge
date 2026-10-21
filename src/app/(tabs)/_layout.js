@@ -1,77 +1,84 @@
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
+import DashBoard from "../../../assets/images/Dashboard.svg";
+import Jobs from "../../../assets/images/Jobs.svg";
+import Learning from "../../../assets/images/Learning.svg";
+import Profile from "../../../assets/images/Profile.svg";
+import Roadmap from "../../../assets/images/Roadmap.svg";
+import SkillGap from "../../../assets/images/Skill.svg";
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#7A1380",
-        tabBarInactiveTintColor: "#7A1380",
+        tabBarActiveTintColor: "#731F94",
+        tabBarInactiveTintColor: "#4A4150",
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.tabBarLabel,
         tabBarItemStyle: styles.tabBarItem,
       }}
     >
+      {/* 1. Dashboard */}
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "Dashboard",
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? "home" : "home-outline"}
-              size={22}
-              color={color}
-            />
+            <DashBoard size={24} color={color} />
           ),
         }}
       />
+
+      {/* 2. Skill Gap */}
       <Tabs.Screen
         name="skills"
         options={{
-          title: "Skills",
+          title: "Skill Gap",
           tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "chart-bar" : "chart-bar"}
-              size={22}
-              color={color}
-            />
+            <SkillGap size={24} color={color} />
           ),
         }}
       />
+
+      {/* 3. Roadmap */}
+      <Tabs.Screen
+        name="roadmap"
+        options={{
+          title: "Roadmap",
+          tabBarIcon: ({ color, focused }) => (
+            <Roadmap size={22} color={color} />
+          ),
+        }}
+      />
+
+      {/* 4. Learning */}
       <Tabs.Screen
         name="learn"
         options={{
-          title: "Learn",
+          title: "Learning",
           tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "calendar-month" : "calendar-month-outline"}
-              size={22}
-              color={color}
-            />
+            <Learning size={24} color={color} />
           ),
         }}
       />
+
+      {/* 5. Jobs */}
       <Tabs.Screen
         name="jobs"
         options={{
           title: "Jobs",
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "briefcase" : "briefcase-outline"}
-              size={22}
-              color={color}
-            />
-          ),
+          tabBarIcon: ({ color, focused }) => <Jobs size={22} color={color} />,
         }}
       />
+
+      {/* 6. Profile */}
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
           tabBarIcon: ({ color, focused }) => (
-            <Feather name="user" size={22} color={color} />
+            <Profile size={22} color={color} />
           ),
         }}
       />
@@ -81,31 +88,28 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    position: "absolute",
-    bottom: Platform.OS === "ios" ? 24 : 16,
-    left: 16,
-    right: 16,
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
-    borderColor: "#7A1380",
-    borderRadius: 20,
-    height: 68,
+    borderTopWidth: 1,
+    borderTopColor: "#F0E5EE",
+    height: 75,
     paddingTop: 8,
-    paddingBottom: 8,
-    marginHorizontal: 16,
-    marginBottom: Platform.OS === "ios" ? 24 : 16,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
     elevation: 4,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    // marginBottom: 10,
   },
   tabBarItem: {
-    height: 48,
+    paddingVertical: 2,
+    paddingBottom: 10,
   },
   tabBarLabel: {
     fontSize: 11,
     fontWeight: "700",
+    letterSpacing: -0.2,
     marginTop: 2,
   },
 });
