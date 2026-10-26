@@ -4,7 +4,6 @@ import {
   Ionicons,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
-import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
@@ -12,507 +11,507 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import LogoSvg from "../../../assets/images/logo.svg";
 
 export default function ProfileScreen() {
   const router = useRouter();
-
-  const [activeCv, setActiveCv] = useState({
-    name: "Amara_Ejike_CV.pdf",
-    size: "1.2 MB",
-    parsedText: "Parsed 3 days ago",
-  });
-
-  const handlePickDocument = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: [
-          "application/pdf",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ],
-        copyToCacheDirectory: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        const file = result.assets[0];
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        setActiveCv({
-          name: file.name,
-          size: `${sizeMb} MB`,
-          parsedText: "Just updated",
-        });
-        Alert.alert("CV Updated", "AI is recalculating your skill gaps.");
-      }
-    } catch (err) {
-      console.log("Error picking document:", err);
-    }
-  };
+  const [directInMail, setDirectInMail] = useState(true);
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FAF8FC" />
 
-      {/* Header Bar */}
+      {/* ================= Header Bar ================= */}
       <View style={styles.headerBar}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={styles.backBtn}
-        >
-          <Ionicons name="chevron-back" size={26} color="#7A1380" />
-        </TouchableOpacity>
+        <View style={styles.headerBrandGroup}>
+          <LogoSvg width={30} height={30} />
+          <View style={{ marginLeft: 8 }}>
+            <Text style={styles.brandTitle}>SkillBridge</Text>
+            <Text style={styles.brandSubtitle}>PROFILE BADGES</Text>
+          </View>
+        </View>
 
-        <TouchableOpacity style={styles.bellBtn} hitSlop={12}>
-          <Ionicons name="notifications" size={22} color="#7A1380" />
-        </TouchableOpacity>
-      </View>
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity style={styles.bellBtn} hitSlop={10}>
+            <Ionicons name="notifications-outline" size={22} color="#1C101B" />
+            <View style={styles.bellDot} />
+          </TouchableOpacity>
 
-      <View style={styles.titleContainer}>
-        <Text style={styles.pageTitle}>Profile</Text>
+          <TouchableOpacity
+            style={styles.settingsBtn}
+            onPress={() => router.push("/profile-settings")}
+            hitSlop={10}
+          >
+            <Ionicons name="settings-outline" size={22} color="#731F94" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ================= 1. User Info & Completion Card ================= */}
-        <View style={styles.profileCard}>
-          <View style={styles.profileTopRow}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>AO</Text>
-            </View>
-
-            <View style={styles.profileDetails}>
-              <Text style={styles.userName}>Amara Okafor</Text>
-              <Text style={styles.userEmail}>amaka.okonkwo@email.com</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location-outline" size={14} color="#5B4E5A" />
-                <Text style={styles.userLocation}>Yaba Mainland, Lagos</Text>
+        {/* ================= 1. User Identity Hero Card ================= */}
+        <View style={styles.heroCard}>
+          {/* User Row */}
+          <View style={styles.heroUserRow}>
+            <View style={styles.avatarWrap}>
+              <View style={styles.avatarCircle} />
+              <View style={styles.avatarGradCapBadge}>
+                <Ionicons name="school" size={11} color="#FFFFFF" />
               </View>
             </View>
-          </View>
 
-          {/* Profile Completion Bar */}
-          <View style={styles.completionHeaderRow}>
-            <View style={styles.completionLabelGroup}>
-              <Feather name="shield" size={13} color="#1C101B" />
-              <Text style={styles.completionLabelText}>Profile Completion</Text>
+            <View style={styles.heroMetaCol}>
+              <View style={styles.nameRow}>
+                <Text style={styles.heroName}>Amaka Okafor</Text>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={16}
+                  color="#731F94"
+                  style={{ marginLeft: 6 }}
+                />
+              </View>
+              <Text style={styles.heroSubtitle}>B.Sc Economics</Text>
             </View>
-            <Text style={styles.completionPercentText}>80%</Text>
           </View>
 
-          <View style={styles.progressBarTrack}>
-            <View style={[styles.progressBarFill, { width: "80%" }]} />
+          {/* Hire-Ready Banner */}
+          <View style={styles.hireReadyBox}>
+            <View style={styles.hireReadyNumberWrap}>
+              <Text style={styles.hireReadyPercent}>84</Text>
+              <Text style={styles.hireReadyPercentSymbol}>%</Text>
+            </View>
+
+            <View style={styles.hireReadyMetaCol}>
+              <Text style={styles.hireReadyLabel}>TIER 1 HIRE–READY</Text>
+              <Text style={styles.hireReadyCohortText}>
+                Top 8% in Lagos Cohort
+              </Text>
+            </View>
+
+            <Feather name="trending-up" size={18} color="#731F94" />
           </View>
 
-          <View style={styles.completionPromptRow}>
-            <Feather name="plus-circle" size={12} color="#5B4E5A" />
-            <Text style={styles.completionPromptText}>
-              Add your certifications to reach 100%.
+          {/* Velocity Progress Bar */}
+          <View style={styles.velocityRow}>
+            <View style={styles.velocityLabelWrap}>
+              <MaterialCommunityIcons
+                name="speedometer"
+                size={14}
+                color="#731F94"
+              />
+              <Text style={styles.velocityText}>
+                Sprint Velocity: Day 14 of 60
+              </Text>
+            </View>
+            <Text style={styles.badgesCountText}>4 of 6 Badges</Text>
+          </View>
+
+          <View style={styles.velocityTrack}>
+            <View style={styles.velocityFill} />
+          </View>
+
+          {/* Streak Sub-stats */}
+          <View style={styles.streakSubRow}>
+            <View style={styles.streakWrap}>
+              <MaterialCommunityIcons name="fire" size={14} color="#731F94" />
+              <Text style={styles.streakText}>12–day study streak</Text>
+            </View>
+            <Text style={styles.nextCapstoneText}>Next: Ledger Capstone</Text>
+          </View>
+        </View>
+
+        {/* ================= 2. Cryptographic Skill Matrix Header ================= */}
+        <View style={styles.matrixHeaderRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.matrixSectionTitle}>
+              Cryptographic Skill Matrix
+            </Text>
+            <Text style={styles.matrixSectionSubtitle}>
+              Immutable proof synced via Lagos Sandbox API
             </Text>
           </View>
-        </View>
 
-        {/* ================= 2. Communication Channels ================= */}
-        <View style={styles.sectionHeaderRow}>
-          <View>
-            <Text style={styles.sectionHeading}>Edit profile data</Text>
-            <Text style={styles.subSectionHeading}>Communication Channels</Text>
-          </View>
-          <TouchableOpacity style={styles.editBtnRow} hitSlop={8}>
-            <MaterialCommunityIcons name="pencil" size={16} color="#7A1380" />
-            <Text style={styles.editText}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Mobile Line */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Feather name="smartphone" size={18} color="#FFFFFF" />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>Mobile Line</Text>
-              <Text style={styles.channelValue}>+234 8145 000 0000</Text>
-            </View>
-          </View>
-          <View style={styles.channelBadge}>
-            <Text style={styles.channelBadgeText}>VERIFIED</Text>
+          <View style={styles.w12Badge}>
+            <Text style={styles.w12BadgeText}>W–12{"\n"}Verified</Text>
           </View>
         </View>
 
-        {/* WhatsApp Alert */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Ionicons
-              name="chatbubble-ellipses-outline"
-              size={18}
-              color="#FFFFFF"
-            />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>WhatsApp Alert</Text>
-              <Text style={styles.channelValue}>+234 8145 000 0000</Text>
+        {/* Badge 1: SQL Expert */}
+        <View style={styles.card}>
+          <View style={styles.badgeTopRow}>
+            <View style={styles.badgeIconWrap}>
+              <MaterialCommunityIcons
+                name="database"
+                size={22}
+                color="#731F94"
+              />
             </View>
-          </View>
-          <View style={styles.channelBadge}>
-            <Text style={styles.channelBadgeText}>Active</Text>
-          </View>
-        </View>
 
-        {/* Target Jobs Relocation */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Ionicons name="location-outline" size={18} color="#FFFFFF" />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>Target Jobs Relocation</Text>
-              <Text style={styles.channelValue}>
-                Lagos/ Remote (NG & Global)
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="checkmark-circle-outline" size={20} color="#FFFFFF" />
-        </View>
-
-        {/* ================= 3. Education & Experience ================= */}
-        <Text
-          style={[
-            styles.sectionHeadingPurple,
-            { marginTop: 22, marginBottom: 10 },
-          ]}
-        >
-          Education & Experience
-        </Text>
-
-        <View style={styles.eduExpContainer}>
-          {/* Degree */}
-          <View style={styles.eduItem}>
-            <View style={styles.eduIconBox}>
-              <Ionicons name="school-outline" size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.eduContent}>
-              <Text style={styles.eduInstitution}>
-                University of Lagos (UNILAG) 2019–2023
-              </Text>
-              <Text style={styles.eduDegree}>
-                B.sc Economics (Second Class Upper Honor)
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.eduDivider} />
-
-          {/* NYSC */}
-          <View style={styles.eduItem}>
-            <View style={styles.eduIconBox}>
-              <Feather name="flag" size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.eduContent}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.eduInstitution}>NYSC (Discharged )</Text>
-                <Text style={styles.eduBadge}>Completed</Text>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={styles.badgeTitleRow}>
+                <Text style={styles.badgeTitle}>SQL Expert Badge</Text>
+                <Ionicons name="checkmark-circle" size={13} color="#731F94" />
               </View>
-              <Text style={styles.eduRole}>
-                Lagos State Ministry of Finance - Budget Analyst Assistant
+              <Text style={styles.badgeValidationText}>
+                UNILAG Registrar API & Sandbox test
               </Text>
-              <Text style={styles.eduLocation}>Alausa, Ikeja, Lagos State</Text>
+              <Text style={styles.badgeIdText}>
+                ID: #SKB–8091 • Block #10928
+              </Text>
+            </View>
+
+            <View style={styles.scoreWrap}>
+              <Text style={styles.scoreText}>
+                <Text style={styles.scoreBig}>98</Text>/100
+              </Text>
+              <Text style={styles.masteryLabel}>MASTERY</Text>
             </View>
           </View>
 
-          <View style={styles.eduDivider} />
-
-          {/* GTBank */}
-          <View style={styles.eduItem}>
-            <View style={styles.eduIconBox}>
-              <FontAwesome5 name="university" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.eduContent}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.eduInstitution}>GTBank Nigeria</Text>
-                <Text style={styles.eduBadge}>6 Months</Text>
+          <View style={styles.chipsAndActionRow}>
+            <View style={styles.skillChipsGroup}>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Window Functions</Text>
               </View>
-              <Text style={styles.eduRole}>
-                Finance Intern - Retail Operations & Reconciliations
-              </Text>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Complex CTEs</Text>
+              </View>
             </View>
+
+            <TouchableOpacity
+              style={styles.pdfDownloadBtn}
+              onPress={() =>
+                Alert.alert("Download", "Downloading SQL Badge PDF...")
+              }
+            >
+              <Feather name="arrow-down-circle" size={14} color="#731F94" />
+              <Text style={styles.pdfBtnText}>PDF</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ================= 4. CV Management Center ================= */}
-        <View
-          style={[styles.sectionHeaderRow, { marginTop: 24, marginBottom: 10 }]}
-        >
-          <View style={styles.rowCenter}>
-            <Ionicons name="folder-open-outline" size={18} color="#7A1380" />
-            <Text style={[styles.sectionHeading, { marginLeft: 8 }]}>
-              CV Management Center
-            </Text>
+        {/* Badge 2: EDA & Statistical Modeling */}
+        <View style={styles.card}>
+          <View style={styles.badgeTopRow}>
+            <View style={styles.badgeIconWrap}>
+              <Feather name="trending-up" size={20} color="#731F94" />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.badgeTitle}>EDA & Statistical Modeling</Text>
+              <Text style={styles.badgeValidationText}>
+                Verified vs Moniepoint transaction schema
+              </Text>
+              <Text style={styles.badgeIdText}>
+                ID: #SKB–8224 • Live Audit Passed
+              </Text>
+            </View>
+
+            <View style={styles.scoreWrap}>
+              <View style={styles.scoreBadgeTop}>
+                <Ionicons name="checkmark-circle" size={12} color="#731F94" />
+                <Text style={styles.scoreText}>
+                  <Text style={styles.scoreBig}>94</Text>/100
+                </Text>
+              </View>
+              <Text style={styles.masteryLabel}>ADVANCED</Text>
+            </View>
           </View>
+
+          <View style={styles.chipsAndActionRow}>
+            <View style={styles.skillChipsGroup}>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Python / Polars</Text>
+              </View>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Risk Matrices</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.pdfDownloadBtn}
+              onPress={() =>
+                Alert.alert("Download", "Downloading EDA Badge PDF...")
+              }
+            >
+              <Feather name="arrow-down-circle" size={14} color="#731F94" />
+              <Text style={styles.pdfBtnText}>PDF</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Badge 3: Financial Statement Analysis */}
+        <View style={styles.card}>
+          <View style={styles.badgeTopRow}>
+            <View style={styles.badgeIconWrap}>
+              <FontAwesome5 name="university" size={16} color="#731F94" />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.badgeTitle}>
+                Financial Statement Analysis
+              </Text>
+              <Text style={styles.badgeValidationText}>
+                Sterling Bank quantitative benchmark criteria
+              </Text>
+              <Text style={styles.badgeIdText}>
+                ID: #SKB–7915 • Peer Reviewed
+              </Text>
+            </View>
+
+            <View style={styles.scoreWrap}>
+              <View style={styles.scoreBadgeTop}>
+                <Ionicons name="checkmark-circle" size={12} color="#731F94" />
+                <Text style={styles.scoreText}>
+                  <Text style={styles.scoreBig}>92</Text>/100
+                </Text>
+              </View>
+              <Text style={styles.masteryLabel}>VERIFIED</Text>
+            </View>
+          </View>
+
+          <View style={styles.chipsAndActionRow}>
+            <View style={styles.skillChipsGroup}>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Ratio Auditing</Text>
+              </View>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Cash Flow Models</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.pdfDownloadBtn}
+              onPress={() =>
+                Alert.alert("Download", "Downloading Financial Analysis PDF...")
+              }
+            >
+              <Feather name="arrow-down-circle" size={14} color="#731F94" />
+              <Text style={styles.pdfBtnText}>PDF</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Badge 4: Advanced MS Excel */}
+        <View style={styles.card}>
+          <View style={styles.badgeTopRow}>
+            <View style={styles.badgeIconWrap}>
+              <MaterialCommunityIcons
+                name="table-large"
+                size={20}
+                color="#731F94"
+              />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={styles.badgeTitleRow}>
+                <Text style={styles.badgeTitle}>Advanced MS Excel</Text>
+                <Ionicons name="checkmark-circle" size={13} color="#731F94" />
+              </View>
+              <Text style={styles.badgeValidationText}>
+                Pivot Engineering & Dynamic Power Queries
+              </Text>
+              <Text style={styles.badgeIdText}>ID: #SKB–7710 • Certified</Text>
+            </View>
+
+            <View style={styles.scoreWrap}>
+              <Text style={styles.scoreText}>
+                <Text style={styles.scoreBig}>95</Text>/100
+              </Text>
+              <Text style={styles.masteryLabel}>MASTERY</Text>
+            </View>
+          </View>
+
+          <View style={styles.chipsAndActionRow}>
+            <View style={styles.skillChipsGroup}>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>Power Pivot</Text>
+              </View>
+              <View style={styles.skillChip}>
+                <Text style={styles.skillChipText}>VBA Macros</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.pdfDownloadBtn}
+              onPress={() =>
+                Alert.alert("Download", "Downloading MS Excel PDF...")
+              }
+            >
+              <Feather name="arrow-down-circle" size={14} color="#731F94" />
+              <Text style={styles.pdfBtnText}>PDF</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Badge 5: Fintech Core & Ledger Reconciliation (Active 65%) */}
+        <View style={styles.card}>
+          <View style={styles.badgeTopRow}>
+            <View style={styles.badgeIconWrap}>
+              <MaterialCommunityIcons name="laptop" size={20} color="#731F94" />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.badgeTitle}>
+                Fintech Core & Ledger Reconciliation
+              </Text>
+              <Text style={styles.badgeValidationText}>
+                Unlocks automatically upon Capstone 1 review
+              </Text>
+              <Text style={styles.sprintTargetText}>Sprint Week 3 Target</Text>
+            </View>
+
+            <View style={styles.scoreWrap}>
+              <Text style={styles.scoreBig}>65%</Text>
+              <Text style={styles.activeLabel}>ACTIVE</Text>
+            </View>
+          </View>
+
+          <View style={styles.velocityTrack}>
+            <View style={[styles.velocityFill, { width: "65%" }]} />
+          </View>
+
+          <View style={styles.activeCardFooter}>
+            <View style={styles.modulesRemainingWrap}>
+              <Feather name="lock" size={11} color="#556070" />
+              <Text style={styles.modulesRemainingText}>
+                2 Modules remaining
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.resumeModuleRow}
+              onPress={() => router.push("/(tabs)/learn")}
+            >
+              <Text style={styles.resumeModuleText}>Resume Module</Text>
+              <Feather name="arrow-right" size={13} color="#731F94" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ================= 3. Cryptographic Credential Box ================= */}
+        <View style={styles.credentialContainer}>
+          <View style={styles.credentialTopHeader}>
+            <View style={styles.qrIconSquare}>
+              <MaterialCommunityIcons
+                name="qrcode-scan"
+                size={20}
+                color="#731F94"
+              />
+            </View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.credTitle}>Cryptographic Credential</Text>
+              <Text style={styles.credSub}>NDPR & ISO–27001 COMPLIANT</Text>
+            </View>
+
+            <View style={styles.liveSyncPill}>
+              <View style={styles.liveSyncDot} />
+              <Text style={styles.liveSyncText}>Live Sync</Text>
+            </View>
+          </View>
+
+          {/* Inner Token Digest Card */}
+          <View style={styles.tokenDigestCard}>
+            <View style={styles.qrPlaceholderBox}>
+              <Ionicons name="qr-code-outline" size={48} color="#731F94" />
+            </View>
+
+            <View style={styles.digestMetaCol}>
+              <Text style={styles.digestLabel}>TOKEN DIGEST</Text>
+              <Text style={styles.digestCode}>NG–DA–2024–8841–A0</Text>
+              <Text style={styles.digestSigner}>
+                Signer: UNILAG Deanery / SkillBridge Lagos Validator
+              </Text>
+              <View style={styles.encryptedRow}>
+                <Feather name="lock" size={10} color="#731F94" />
+                <Text style={styles.encryptedText}>
+                  Encrypted ECDSA SHA–256
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action 1: Add to LinkedIn */}
           <TouchableOpacity
-            style={styles.outlinedUpdateBtn}
-            onPress={handlePickDocument}
-            activeOpacity={0.8}
+            style={styles.linkedInBtn}
+            activeOpacity={0.88}
+            onPress={() =>
+              Alert.alert(
+                "LinkedIn",
+                "Redirecting to add credential to LinkedIn profile...",
+              )
+            }
           >
-            <MaterialCommunityIcons
-              name="pencil-outline"
-              size={13}
-              color="#7A1380"
-            />
-            <Text style={styles.outlinedUpdateText}>Update</Text>
+            <Feather name="link" size={15} color="#FFFFFF" />
+            <Text style={styles.linkedInBtnText}>
+              Add Verified Credential to LinkedIn Profile
+            </Text>
           </TouchableOpacity>
-        </View>
 
-        {/* Active CV Bar */}
-        <View style={styles.activeCvBar}>
-          <View style={styles.rowCenter}>
-            <Ionicons name="document-text-outline" size={24} color="#FFFFFF" />
-            <View style={{ marginLeft: 10 }}>
-              <Text style={styles.activeCvName}>{activeCv.name}</Text>
-              <Text style={styles.activeCvMeta}>
-                {activeCv.size} • {activeCv.parsedText}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity hitSlop={10}>
-            <Feather name="download" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Re-upload Area */}
-        <View style={styles.reuploadCard}>
-          <Feather name="upload-cloud" size={40} color="#7A1380" />
-          <Text style={styles.reuploadTitle}>
-            Tap to Replace or Re-upload CV
-          </Text>
-
+          {/* Action 2: Download PDF Dossier */}
           <TouchableOpacity
-            style={styles.browseButton}
-            onPress={handlePickDocument}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.browseButtonText}>Browse Files</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.uploadFormatNotice}>
-            Supports PDF, DOCX (Max 5MB)
-          </Text>
-        </View>
-
-        {/* Auto Gap Analysis Banner */}
-        <View style={styles.gapBanner}>
-          <MaterialCommunityIcons
-            name="creation"
-            size={20}
-            color="#FFFFFF"
-            style={{ marginTop: 2 }}
-          />
-          <Text style={styles.gapBannerText}>
-            <Text style={{ fontWeight: "800" }}>Auto Gap Analysis: </Text>
-            Updating your CV triggers an instant skill-recalculation across
-            Lagos Tech & Remote Finance roles.
-          </Text>
-        </View>
-
-        {/* ================= 5. Resume Audit Trail ================= */}
-        <Text
-          style={[
-            styles.sectionHeaderSmall,
-            { marginTop: 24, marginBottom: 10 },
-          ]}
-        >
-          RESUME AUDIT TRAIL
-        </Text>
-
-        <View style={styles.auditCard}>
-          {/* v2.1 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineLine} />
-            </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v2.1 (Active)</Text>
-                <Text style={styles.auditDate}>Oct 18</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                Appended Lagos Ministry NYSC discharge certificate & SQL Data
-                track.
-              </Text>
-            </View>
-          </View>
-
-          {/* v2.0 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineLine} />
-            </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v2.0</Text>
-                <Text style={styles.auditDate}>Aug 04</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                UNILAG graduation credential added + GTBank finance internship
-                portfolio.
-              </Text>
-            </View>
-          </View>
-
-          {/* v1.0 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-            </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v1.0</Text>
-                <Text style={styles.auditDate}>Jun 12</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                Initial scanner profile ingest.
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ================= 6. Membership & Credits ================= */}
-        <View
-          style={[styles.sectionHeaderRow, { marginTop: 24, marginBottom: 10 }]}
-        >
-          <View style={styles.rowCenter}>
-            <MaterialCommunityIcons
-              name="shield-star-outline"
-              size={20}
-              color="#7A1380"
-            />
-            <Text style={[styles.sectionHeading, { marginLeft: 8 }]}>
-              Membership & Credits
-            </Text>
-          </View>
-          <View style={styles.basicPlanBadge}>
-            <Text style={styles.basicPlanText}>BASIC PLAN</Text>
-          </View>
-        </View>
-
-        <View style={styles.membershipCard}>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.tierName}>Pathfinder Free Tier</Text>
-              <Text style={styles.tierSubtitle}>
-                Standard graduate discovery pass
-              </Text>
-            </View>
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={22}
-              color="#7A1380"
-            />
-          </View>
-
-          <View style={styles.tierStatsRow}>
-            <View style={styles.tierStatBox}>
-              <Text style={styles.tierStatLabel}>Weekly AI Matches</Text>
-              <Text style={styles.tierStatValue}>3 of 3 used</Text>
-            </View>
-
-            <View style={styles.tierStatBox}>
-              <Text style={styles.tierStatLabel}>Pathway Horizon</Text>
-              <Text style={styles.tierStatValue}>60–Day View</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ================= 7. Upgrade to Pathfinder Pro ================= */}
-        <View style={styles.upgradeCard}>
-          <View style={styles.rowBetween}>
-            <View style={styles.growthBadge}>
-              <Ionicons name="flash" size={12} color="#FFFFFF" />
-              <Text style={styles.growthBadgeText}>
-                Accelerated Career Growth
-              </Text>
-            </View>
-            <Text style={styles.pricingText}>₦3,500/mo</Text>
-          </View>
-
-          <Text style={styles.upgradeTitle}>Upgrade to Pathfinder Pro</Text>
-          <Text style={styles.upgradeDescription}>
-            Unlock high-volume Nigerian & remote hiring pipeline with
-            specialized tooling.
-          </Text>
-
-          {/* Checklist */}
-          <View style={styles.checkItemRow}>
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={18}
-              color="#7A1380"
-            />
-            <Text style={styles.checkItemText}>
-              Unlimited Career Track deep dives & SQL benchmarks
-            </Text>
-          </View>
-
-          <View style={styles.checkItemRow}>
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={18}
-              color="#7A1380"
-            />
-            <Text style={styles.checkItemText}>
-              Direct Recruiter InMail pings to verified talent teams
-            </Text>
-          </View>
-
-          <View style={styles.checkItemRow}>
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={18}
-              color="#7A1380"
-            />
-            <Text style={styles.checkItemText}>
-              1-on-1 Mentor capstone review (Finance & Tech tracks)
-            </Text>
-          </View>
-
-          {/* Checkout CTA */}
-          <TouchableOpacity
-            style={styles.upgradeCtaBtn}
+            style={styles.dossierBtn}
             activeOpacity={0.85}
-            onPress={() => router.push("/upgrade")}
+            onPress={() =>
+              Alert.alert(
+                "PDF Dossier",
+                "Downloading complete verified credential dossier...",
+              )
+            }
           >
-            <Text style={styles.upgradeCtaText}>
-              Upgrade via Paystack / Flutterwave
+            <Feather name="file-text" size={15} color="#731F94" />
+            <Text style={styles.dossierBtnText}>
+              Download Verified PDF Skill Dossier
             </Text>
           </TouchableOpacity>
 
-          <Text style={styles.saveNoticeText}>
-            Save 33% by choosing ₦28,000 / annual bill
+          {/* Direct InMail Switcher */}
+          <View style={styles.inMailCard}>
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <View style={styles.inMailTitleRow}>
+                <Text style={styles.inMailTitle}>
+                  Lagos FinTech Direct InMail
+                </Text>
+                <View style={styles.inMailDot} />
+              </View>
+              <Text style={styles.inMailDesc}>
+                Allows Moniepoint, Flutterwave, and Sterling Bank talent leads
+                to message Amaka directly.
+              </Text>
+            </View>
+
+            <Switch
+              value={directInMail}
+              onValueChange={setDirectInMail}
+              trackColor={{ false: "#D1C2CE", true: "#731F94" }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        </View>
+
+        {/* ================= 4. Accreditation Notice & Settings CTA ================= */}
+        <View style={styles.registryNoticeRow}>
+          <Feather name="shield" size={13} color="#731F94" />
+          <Text style={styles.registryNoticeText}>
+            SkillBridge Career Acceleration • Verified Cohort Registry
           </Text>
         </View>
 
-        {/* ================= 8. Master Settings Hub ================= */}
         <TouchableOpacity
-          style={styles.masterSettingsHubCard}
-          activeOpacity={0.85}
-          onPress={() => router.push("/settings")}
+          style={styles.profileSettingsBtn}
+          activeOpacity={0.88}
+          onPress={() => router.push("/profile-settings")}
         >
-          <View style={styles.rowCenter}>
-            <MaterialCommunityIcons
-              name="cog-outline"
-              size={24}
-              color="#FFFFFF"
-            />
-            <View style={{ marginLeft: 12 }}>
-              <Text style={styles.settingsHubTitle}>Master Settings Hub</Text>
-              <Text style={styles.settingsHubSubtitle}>
-                Security, WhatsApp Alerts, Data Privacy & Exports
-              </Text>
-            </View>
-          </View>
-          <Feather name="chevron-right" size={22} color="#FFFFFF" />
+          <Text style={styles.profileSettingsBtnText}>Profile Settings</Text>
+          <Ionicons name="settings" size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -522,558 +521,589 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#FAF8FC",
   },
   headerBar: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    height: 44,
-  },
-  backBtn: {
-    width: 36,
-    justifyContent: "center",
-  },
-  bellBtn: {
-    width: 36,
-    alignItems: "flex-end",
-    justifyContent: "center",
-  },
-  titleContainer: {
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0E5EE",
+    paddingTop: 8,
+    paddingBottom: 10,
+    backgroundColor: "#FAF8FC",
   },
-  pageTitle: {
-    fontSize: 22,
+  headerBrandGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  brandTitle: {
+    fontSize: 15,
     fontWeight: "800",
     color: "#1C101B",
-    letterSpacing: -0.4,
+    lineHeight: 18,
+  },
+  brandSubtitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#731F94",
+    letterSpacing: 0.6,
+  },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  bellBtn: {
+    position: "relative",
+    padding: 2,
+  },
+  bellDot: {
+    position: "absolute",
+    top: 2,
+    right: 3,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#731F94",
+  },
+  settingsBtn: {
+    padding: 2,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 110, // accounts for the floating bottom tab bar
+    paddingTop: 8,
+    paddingBottom: 110,
   },
-  profileCard: {
-    borderWidth: 1.2,
-    borderColor: "#7A1380",
-    borderRadius: 16,
-    padding: 16,
+
+  /* 1. Hero Identity Card */
+  heroCard: {
     backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
     elevation: 2,
-    shadowColor: "#000000",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 6,
   },
-  profileTopRow: {
+  heroUserRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 14,
   },
-  avatarCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#7A1380",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-  },
-  avatarText: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  profileDetails: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1C101B",
-    marginBottom: 2,
-  },
-  userEmail: {
-    fontSize: 13,
-    color: "#5B4E5A",
-    marginBottom: 4,
-  },
-  locationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  userLocation: {
-    fontSize: 12,
-    color: "#1C101B",
-    marginLeft: 4,
-    fontWeight: "500",
-  },
-  completionHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 16,
-    marginBottom: 6,
-  },
-  completionLabelGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  completionLabelText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#1C101B",
-    marginLeft: 6,
-  },
-  completionPercentText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#1C101B",
-  },
-  progressBarTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#EBDDE9",
-    overflow: "hidden",
-    marginBottom: 8,
-  },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: "#7A1380",
-    borderRadius: 3,
-  },
-  completionPromptRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  completionPromptText: {
-    fontSize: 11,
-    color: "#5B4E5A",
-    marginLeft: 6,
-  },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  sectionHeading: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1C101B",
-  },
-  subSectionHeading: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#1C101B",
-    marginTop: 2,
-  },
-  sectionHeadingPurple: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#7A1380",
-  },
-  sectionHeaderSmall: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#1C101B",
-    letterSpacing: 0.5,
-  },
-  editBtnRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  editText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#7A1380",
-    marginLeft: 4,
-  },
-  channelPill: {
-    backgroundColor: "#7A1380",
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  channelLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 8,
-  },
-  channelTextGroup: {
-    marginLeft: 12,
-  },
-  channelTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  channelValue: {
-    fontSize: 12,
-    color: "#F0E5EE",
-    marginTop: 1,
-  },
-  channelBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.18)",
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-  },
-  channelBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  eduExpContainer: {
-    backgroundColor: "#7A1380",
-    borderRadius: 14,
-    padding: 14,
-  },
-  eduItem: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: 6,
-  },
-  eduIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: "rgba(255, 255, 255, 0.16)",
-    alignItems: "center",
-    justifyContent: "center",
+  avatarWrap: {
+    position: "relative",
     marginRight: 12,
   },
-  eduContent: {
+  avatarCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#F5EEFC",
+    borderWidth: 1.5,
+    borderColor: "#731F94",
+  },
+  avatarGradCapBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#731F94",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  heroMetaCol: {
     flex: 1,
   },
-  eduInstitution: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  eduDegree: {
-    fontSize: 12,
-    color: "#E8D6E6",
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  eduRole: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#FFFFFF",
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  eduLocation: {
-    fontSize: 11,
-    color: "#D8C2D6",
-    marginTop: 2,
-  },
-  eduBadge: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  eduDivider: {
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.18)",
-    marginVertical: 10,
-  },
-  outlinedUpdateBtn: {
-    borderWidth: 1,
-    borderColor: "#7A1380",
-    borderRadius: 4,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
+  nameRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-  outlinedUpdateText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#7A1380",
-    marginLeft: 3,
+  heroName: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#131B2A",
   },
-  activeCvBar: {
-    backgroundColor: "#7A1380",
-    borderRadius: 8,
+  heroSubtitle: {
+    fontSize: 12,
+    color: "#556070",
+    marginTop: 2,
+  },
+  hireReadyBox: {
+    backgroundColor: "#FAF5FC",
+    borderRadius: 14,
     paddingVertical: 10,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  activeCvName: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  activeCvMeta: {
-    fontSize: 11,
-    color: "#E8D6E6",
-    marginTop: 1,
-  },
-  reuploadCard: {
-    borderWidth: 1.2,
-    borderColor: "#7A1380",
-    borderRadius: 14,
-    paddingVertical: 22,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-    backgroundColor: "#FFFFFF",
-  },
-  reuploadTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#1C101B",
-    marginTop: 8,
-    marginBottom: 10,
-  },
-  browseButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: "#7A1380",
-    borderRadius: 6,
-  },
-  browseButtonText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#7A1380",
-  },
-  uploadFormatNotice: {
-    fontSize: 11,
-    color: "#6E616D",
-    marginTop: 12,
-  },
-  gapBanner: {
-    backgroundColor: "#7A1380",
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  gapBannerText: {
-    fontSize: 12,
-    color: "#FFFFFF",
-    lineHeight: 16,
-    flex: 1,
-    marginLeft: 8,
-  },
-  auditCard: {
-    borderWidth: 1.2,
-    borderColor: "#7A1380",
-    borderRadius: 12,
-    padding: 14,
-    backgroundColor: "#FFFFFF",
-  },
-  auditRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  timelineCol: {
-    width: 18,
-    alignItems: "center",
-    marginRight: 10,
-  },
-  timelineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#1C101B",
-    marginTop: 4,
-  },
-  timelineLine: {
-    width: 1.5,
-    flex: 1,
-    backgroundColor: "#C5BAC4",
-    minHeight: 38,
-  },
-  auditDetails: {
-    flex: 1,
-    paddingBottom: 14,
-  },
-  auditVersion: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#1C101B",
-  },
-  auditDate: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#1C101B",
-  },
-  auditDescription: {
-    fontSize: 12,
-    color: "#4B3F4B",
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  basicPlanBadge: {
-    backgroundColor: "#7A1380",
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-  },
-  basicPlanText: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 0.3,
-  },
-  membershipCard: {
-    borderWidth: 1.2,
-    borderColor: "#7A1380",
-    borderRadius: 12,
-    padding: 14,
-    backgroundColor: "#FFFFFF",
-    marginBottom: 16,
-  },
-  tierName: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#1C101B",
-  },
-  tierSubtitle: {
-    fontSize: 12,
-    color: "#5B4E5A",
-    marginTop: 1,
-  },
-  tierStatsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 14,
-  },
-  tierStatBox: {
-    width: "48%",
-    borderWidth: 1,
-    borderColor: "#7A1380",
-    borderRadius: 8,
-    padding: 10,
-  },
-  tierStatLabel: {
-    fontSize: 11,
-    color: "#5B4E5A",
-    fontWeight: "600",
-  },
-  tierStatValue: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#1C101B",
-    marginTop: 4,
-  },
-  upgradeCard: {
-    borderWidth: 1.5,
-    borderColor: "#0284C7", // accent highlight matching the design artboard border
-    borderRadius: 12,
-    padding: 16,
-    backgroundColor: "#FFFFFF",
-    marginBottom: 16,
-  },
-  growthBadge: {
-    backgroundColor: "#7A1380",
-    borderRadius: 12,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  growthBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    marginLeft: 4,
-  },
-  pricingText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#1C101B",
-  },
-  upgradeTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1C101B",
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  upgradeDescription: {
-    fontSize: 12,
-    color: "#5B4E5A",
-    lineHeight: 16,
     marginBottom: 14,
   },
-  checkItemRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  checkItemText: {
-    fontSize: 12,
-    color: "#1C101B",
-    lineHeight: 16,
-    flex: 1,
-    marginLeft: 8,
-    fontWeight: "500",
-  },
-  upgradeCtaBtn: {
-    backgroundColor: "#7A1380",
+  hireReadyNumberWrap: {
+    backgroundColor: "#EAE1FA",
     borderRadius: 10,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "baseline",
+    marginRight: 10,
   },
-  upgradeCtaText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FFFFFF",
+  hireReadyPercent: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#731F94",
   },
-  saveNoticeText: {
+  hireReadyPercentSymbol: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#7A1380",
-    textAlign: "center",
-    marginTop: 8,
+    fontWeight: "800",
+    color: "#731F94",
   },
-  masterSettingsHubCard: {
-    backgroundColor: "#7A1380",
-    borderRadius: 12,
-    padding: 16,
+  hireReadyMetaCol: {
+    flex: 1,
+  },
+  hireReadyLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#731F94",
+    letterSpacing: 0.3,
+  },
+  hireReadyCohortText: {
+    fontSize: 11,
+    color: "#556070",
+    marginTop: 1,
+  },
+  velocityRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  velocityLabelWrap: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 4,
+  },
+  velocityText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#131B2A",
+  },
+  badgesCountText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  velocityTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#F0E5F7",
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  velocityFill: {
+    width: "68%",
+    height: "100%",
+    backgroundColor: "#731F94",
+    borderRadius: 3,
+  },
+  streakSubRow: {
+    flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  streakWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  streakText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#731F94",
+  },
+  nextCapstoneText: {
+    fontSize: 10,
+    color: "#556070",
+    fontWeight: "600",
+  },
+
+  /* 2. Cryptographic Skill Matrix */
+  matrixHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 12,
   },
-  settingsHubTitle: {
+  matrixSectionTitle: {
     fontSize: 15,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  matrixSectionSubtitle: {
+    fontSize: 11,
+    color: "#556070",
+    marginTop: 1,
+  },
+  w12Badge: {
+    backgroundColor: "#EAE1FA",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  w12BadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#731F94",
+    textAlign: "center",
+  },
+
+  /* Shared Badge Card */
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+  },
+  badgeTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 12,
+  },
+  badgeIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "#FAF5FC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  badgeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#131B2A",
+  },
+  badgeValidationText: {
+    fontSize: 10,
+    color: "#556070",
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  badgeIdText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#7B6F84",
+    marginTop: 2,
+  },
+  scoreWrap: {
+    alignItems: "flex-end",
+  },
+  scoreBadgeTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  scoreText: {
+    fontSize: 10,
+    color: "#7B6F84",
+    fontWeight: "600",
+  },
+  scoreBig: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  masteryLabel: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#731F94",
+    letterSpacing: 0.4,
+    marginTop: 1,
+  },
+  activeLabel: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#731F94",
+    letterSpacing: 0.4,
+    marginTop: 1,
+  },
+  sprintTargetText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#731F94",
+    marginTop: 2,
+  },
+  chipsAndActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  skillChipsGroup: {
+    flexDirection: "row",
+    gap: 6,
+    flexWrap: "wrap",
+    flex: 1,
+  },
+  skillChip: {
+    backgroundColor: "#FAF5FC",
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  skillChipText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#556070",
+  },
+  pdfDownloadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingLeft: 6,
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  activeCardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  modulesRemainingWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  modulesRemainingText: {
+    fontSize: 10,
+    color: "#556070",
+    fontWeight: "600",
+  },
+  resumeModuleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  resumeModuleText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+
+  /* 3. Cryptographic Credential */
+  credentialContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 4,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+  },
+  credentialTopHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  qrIconSquare: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FAF5FC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  credTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  credSub: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#7B6F84",
+    letterSpacing: 0.3,
+    marginTop: 1,
+  },
+  liveSyncPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5EEFC",
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    gap: 4,
+  },
+  liveSyncDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#731F94",
+  },
+  liveSyncText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  tokenDigestCard: {
+    backgroundColor: "#FAF5FC",
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  qrPlaceholderBox: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  digestMetaCol: {
+    flex: 1,
+  },
+  digestLabel: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#7B6F84",
+    letterSpacing: 0.4,
+  },
+  digestCode: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#731F94",
+    marginTop: 1,
+  },
+  digestSigner: {
+    fontSize: 9,
+    color: "#556070",
+    lineHeight: 12,
+    marginTop: 2,
+  },
+  encryptedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  encryptedText: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#731F94",
+  },
+  linkedInBtn: {
+    height: 44,
+    backgroundColor: "#731F94",
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  linkedInBtnText: {
+    fontSize: 12,
     fontWeight: "800",
     color: "#FFFFFF",
   },
-  settingsHubSubtitle: {
+  dossierBtn: {
+    height: 42,
+    backgroundColor: "#F0E5F7",
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginBottom: 12,
+  },
+  dossierBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#731F94",
+  },
+  inMailCard: {
+    backgroundColor: "#FAF8FC",
+    borderRadius: 12,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  inMailTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  inMailTitle: {
     fontSize: 11,
-    color: "#E8D6E6",
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  inMailDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#731F94",
+  },
+  inMailDesc: {
+    fontSize: 9,
+    color: "#556070",
+    lineHeight: 13,
     marginTop: 2,
-    width: 220,
   },
-  rowBetween: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  rowCenter: {
+
+  /* 4. Footer Settings Action */
+  registryNoticeRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginBottom: 10,
+  },
+  registryNoticeText: {
+    fontSize: 10,
+    color: "#556070",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  profileSettingsBtn: {
+    height: 48,
+    backgroundColor: "#731F94",
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  profileSettingsBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 });
