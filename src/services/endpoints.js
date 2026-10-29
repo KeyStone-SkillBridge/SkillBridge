@@ -2,11 +2,11 @@ import api from "./api";
 
 // ================= AUTHENTICATION =================
 export const authService = {
-  register: (userData) => api.post("/api/auth/register", userData),
-  login: (credentials) => api.post("/api/auth/login", credentials),
-  forgotPassword: (data) => api.post("/api/auth/forgot-password", data),
-  verifyResetCode: (data) => api.post("/api/auth/verify-reset-code", data),
-  resetPassword: (data) => api.post("/api/auth/reset-password", data),
+  register: (userData) => api.post("/api/v1/auth/register", userData),
+  login: (credentials) => api.post("/api/v1/auth/login", credentials),
+  forgotPassword: (data) => api.post("/api/v1/auth/forgot-password", data),
+  verifyResetCode: (data) => api.post("/api/v1/auth/verify-reset-code", data),
+  resetPassword: (data) => api.post("/api/v1/auth/reset-password", data),
 };
 
 // ================= USER & PROFILES =================
