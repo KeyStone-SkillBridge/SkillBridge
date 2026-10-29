@@ -1,7 +1,10 @@
 import { Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import { authService } from "../services/endpoints";
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -27,13 +31,15 @@ export default function SignUpScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [emailError, setEmailError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const isFormValid =
     fullName.trim() !== "" &&
     email.trim() !== "" &&
     password.trim() !== "" &&
     !emailError &&
-    agreeTerms;
+    agreeTerms &&
+    !loading;
 
   const validateEmail = (text) => {
     setEmail(text);
@@ -45,16 +51,48 @@ export default function SignUpScreen() {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!email || emailError) {
       setEmailError("Enter a valid email address");
       return;
     }
-    router.push("/profile-setup");
+
+    setLoading(true);
+    try {
+      // Send payload covering common backend field structures
+      const payload = {
+        email: email.trim().toLowerCase(),
+        password: password,
+        fullName: fullName.trim(),
+        name: fullName.trim(),
+      };
+
+      const response = await authService.register(payload);
+      const data = response.data;
+
+      // Extract and persist token if returned upon registration
+      const token = data?.token || data?.access_token || data?.data?.token;
+      if (token) {
+        await AsyncStorage.setItem("user_token", token);
+      }
+
+      // Route directly to profile setup
+      router.push("/profile-setup");
+    } catch (error) {
+      const serverMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.response?.data?.error ||
+        "Unable to create account. Please check your network connection and try again.";
+
+      Alert.alert("Registration Failed", serverMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignUp = () => {
-    // Google Sign Up logic
+    Alert.alert("Google Sign Up", "Google OAuth will be initialized.");
   };
 
   return (
@@ -98,6 +136,7 @@ export default function SignUpScreen() {
                 value={fullName}
                 onChangeText={setFullName}
                 autoCapitalize="words"
+                editable={!loading}
               />
             </View>
 
@@ -109,13 +148,14 @@ export default function SignUpScreen() {
                   styles.input,
                   emailError ? styles.inputErrorBorder : null,
                 ]}
-                placeholder="Enter email address"
+                placeholder="Enter email addresss"
                 placeholderTextColor="#A396A1"
                 value={email}
                 onChangeText={validateEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                editable={!loading}
               />
               {emailError ? (
                 <View style={styles.errorRow}>
@@ -137,6 +177,7 @@ export default function SignUpScreen() {
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
+                  editable={!loading}
                 />
                 <TouchableOpacity
                   onPress={() => setShowPassword((prev) => !prev)}
@@ -177,7 +218,11 @@ export default function SignUpScreen() {
               disabled={!isFormValid}
               style={[styles.nextButton, !isFormValid && styles.disabledButton]}
             >
-              <Text style={styles.nextButtonText}>Next</Text>
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.nextButtonText}>Next</Text>
+              )}
             </TouchableOpacity>
 
             {/* Divider */}
@@ -191,6 +236,7 @@ export default function SignUpScreen() {
             <TouchableOpacity
               onPress={handleGoogleSignUp}
               activeOpacity={0.85}
+              disabled={loading}
               style={styles.googleButton}
             >
               <Svg

@@ -2,8 +2,8 @@ import api from "./api";
 
 // ================= AUTHENTICATION =================
 export const authService = {
-  login: (data) => api.post("/api/auth/login", data),
-  register: (data) => api.post("/api/auth/register", data),
+  register: (userData) => api.post("/api/auth/register", userData),
+  login: (credentials) => api.post("/api/auth/login", credentials),
   forgotPassword: (data) => api.post("/api/auth/forgot-password", data),
   verifyResetCode: (data) => api.post("/api/auth/verify-reset-code", data),
   resetPassword: (data) => api.post("/api/auth/reset-password", data),
