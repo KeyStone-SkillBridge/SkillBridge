@@ -58,41 +58,46 @@ export default function SignUpScreen() {
     }
 
     setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = fullName.trim();
+
     try {
-      // Send payload covering common backend field structures
       const payload = {
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password: password,
-        fullName: fullName.trim(),
-        name: fullName.trim(),
+        full_name: cleanName,
+        name: cleanName,
       };
 
       const response = await authService.register(payload);
-      const data = response.data;
+      const data = response?.data;
 
-      // Extract and persist token if returned upon registration
+      // If the backend returns an initial session/verification token, cache it
       const token = data?.token || data?.access_token || data?.data?.token;
       if (token) {
         await AsyncStorage.setItem("user_token", token);
       }
 
-      // Route directly to profile setup
-      router.push("/profile-setup");
+      // Navigate to OTP verification screen with user details
+      router.push({
+        pathname: "/verify-otp",
+        params: {
+          email: cleanEmail,
+          fullName: cleanName,
+          flow: "registration",
+        },
+      });
     } catch (error) {
       const serverMessage =
         error.response?.data?.message ||
         error.response?.data?.detail ||
         error.response?.data?.error ||
-        "Unable to create account. Please check your network connection and try again.";
+        "Unable to create account. Please check your internet connection and try again.";
 
-      Alert.alert("Registration Failed", serverMessage);
+      Alert.alert("Registration Error", serverMessage);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGoogleSignUp = () => {
-    Alert.alert("Google Sign Up", "Google OAuth will be initialized.");
   };
 
   return (
@@ -117,7 +122,7 @@ export default function SignUpScreen() {
               </TouchableOpacity>
 
               <View style={styles.logoWrapper}>
-                <LogoSvg width={30} height={30} fill="#7A1380" />
+                <LogoSvg width={30} height={30} />
               </View>
 
               <View style={styles.headerRightPlaceholder} />
@@ -148,7 +153,7 @@ export default function SignUpScreen() {
                   styles.input,
                   emailError ? styles.inputErrorBorder : null,
                 ]}
-                placeholder="Enter email addresss"
+                placeholder="Enter email address"
                 placeholderTextColor="#A396A1"
                 value={email}
                 onChangeText={validateEmail}
@@ -221,7 +226,7 @@ export default function SignUpScreen() {
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.nextButtonText}>Next</Text>
+                <Text style={styles.nextButtonText}>Create Account</Text>
               )}
             </TouchableOpacity>
 
@@ -232,9 +237,14 @@ export default function SignUpScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Google Sign In Button */}
+            {/* Google Sign In */}
             <TouchableOpacity
-              onPress={handleGoogleSignUp}
+              onPress={() =>
+                Alert.alert(
+                  "Google Sign Up",
+                  "Connecting Google OAuth service...",
+                )
+              }
               activeOpacity={0.85}
               disabled={loading}
               style={styles.googleButton}
@@ -412,12 +422,12 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: "#3C303B",
+    backgroundColor: "#E2D9E2",
   },
   dividerText: {
     marginHorizontal: 12,
     fontSize: 13,
-    color: "#1C101B",
+    color: "#7B6F84",
     fontWeight: "500",
   },
   googleButton: {
