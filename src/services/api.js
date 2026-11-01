@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 
-export const BASE_URL = "https://skillbridge-backend-78ix.onrender.com";
+export const BASE_URL =
+  "https://skillbridge-api.tb-skillbridge-backend.workers.dev";
 
 const api = axios.create({
   baseURL: BASE_URL,
