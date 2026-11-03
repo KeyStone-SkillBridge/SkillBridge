@@ -33,6 +33,7 @@ export const asList = (res) => {
 export const authService = {
   register: (userData) => api.post("/api/v1/auth/register", userData),
   login: (credentials) => api.post("/api/v1/auth/login", credentials),
+  verifyEmail: (data) => api.post("/api/v1/auth/verify-email", data), // { email, code }
   forgotPassword: (data) => api.post("/api/v1/auth/forgot-password", data),
   verifyResetCode: (data) => api.post("/api/v1/auth/verify-reset-code", data),
   resetPassword: (data) => api.post("/api/v1/auth/reset-password", data),

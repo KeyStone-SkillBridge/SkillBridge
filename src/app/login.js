@@ -47,6 +47,7 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    console.log("Attempting login with email:", email);
     if (!email || emailError) {
       setEmailError("Enter a valid email address");
       return;
@@ -85,6 +86,10 @@ export default function LoginScreen() {
               "Invalid email or password. Please verify your credentials and try again.",
             );
 
+      console.error(
+        "Login failed:",
+        error.response?.data || error.message || error,
+      );
       Alert.alert("Login Failed", serverMessage);
     } finally {
       setLoading(false);

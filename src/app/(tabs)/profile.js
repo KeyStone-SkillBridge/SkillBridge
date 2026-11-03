@@ -1,8 +1,4 @@
-import {
-  Feather,
-  Ionicons,
-  MaterialCommunityIcons,
-} from "@expo/vector-icons";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   RefreshControl,
@@ -20,7 +16,13 @@ import { skillIcon } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
 
 const tierFor = (pct) =>
-  pct >= 80 ? "HIRE–READY" : pct >= 60 ? "NEARLY READY" : pct >= 35 ? "DEVELOPING" : "GETTING STARTED";
+  pct >= 80
+    ? "HIRE–READY"
+    : pct >= 60
+      ? "NEARLY READY"
+      : pct >= 35
+        ? "DEVELOPING"
+        : "GETTING STARTED";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -40,6 +42,7 @@ export default function ProfileScreen() {
     { icon: "phone", label: "Phone", value: profile.phone },
     { icon: "mail", label: "Email", value: data?.me?.email },
   ].filter((d) => d.value);
+  console.log("Profile details:", details);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -74,246 +77,294 @@ export default function ProfileScreen() {
       {loading && !data ? (
         <LoadingState label="Loading your profile..." />
       ) : (
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
-        }
-      >
-        {/* ================= 1. User Identity Hero Card ================= */}
-        <View style={styles.heroCard}>
-          {/* User Row */}
-          <View style={styles.heroUserRow}>
-            <View style={styles.avatarWrap}>
-              <View style={styles.avatarCircle} />
-              <View style={styles.avatarGradCapBadge}>
-                <Ionicons name="school" size={11} color="#FFFFFF" />
-              </View>
-            </View>
-
-            <View style={styles.heroMetaCol}>
-              <View style={styles.nameRow}>
-                <Text style={styles.heroName}>{stats.fullName || "Your Name"}</Text>
-                {data?.me?.isVerified && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color="#731F94"
-                    style={{ marginLeft: 6 }}
-                  />
-                )}
-              </View>
-              <Text style={styles.heroSubtitle}>
-                {stats.targetRole || profile.education || data?.me?.email || ""}
-              </Text>
-            </View>
-          </View>
-
-          {/* Hire-Ready Banner */}
-          <View style={styles.hireReadyBox}>
-            <View style={styles.hireReadyNumberWrap}>
-              <Text style={styles.hireReadyPercent}>{stats.readiness}</Text>
-              <Text style={styles.hireReadyPercentSymbol}>%</Text>
-            </View>
-
-            <View style={styles.hireReadyMetaCol}>
-              <Text style={styles.hireReadyLabel}>{tierFor(stats.readiness)}</Text>
-              <Text style={styles.hireReadyCohortText}>
-                {stats.missingSkills.length
-                  ? `${stats.missingSkills.length} skill gap${stats.missingSkills.length > 1 ? "s" : ""} remaining`
-                  : stats.hasGap
-                    ? "No critical gaps"
-                    : "Upload your CV to get scored"}
-              </Text>
-            </View>
-
-            <Feather name="trending-up" size={18} color="#731F94" />
-          </View>
-
-          {/* Velocity Progress Bar */}
-          <View style={styles.velocityRow}>
-            <View style={styles.velocityLabelWrap}>
-              <MaterialCommunityIcons
-                name="speedometer"
-                size={14}
-                color="#731F94"
-              />
-              <Text style={styles.velocityText}>
-                {stats.hasRoadmap ? `Roadmap: Day ${stats.dayNumber} of 90` : "Roadmap not started"}
-              </Text>
-            </View>
-            <Text style={styles.badgesCountText}>
-              {stats.doneTasks} of {stats.tasks.length} Tasks
-            </Text>
-          </View>
-
-          <View style={styles.velocityTrack}>
-            <View style={[styles.velocityFill, { width: `${stats.taskPct}%` }]} />
-          </View>
-
-          {/* Sub-stats */}
-          <View style={styles.streakSubRow}>
-            <View style={styles.streakWrap}>
-              <MaterialCommunityIcons name="fire" size={14} color="#731F94" />
-              <Text style={styles.streakText}>
-                {stats.completedProgress} resource{stats.completedProgress === 1 ? "" : "s"} completed
-              </Text>
-            </View>
-            {!!nextTask && (
-              <Text style={styles.nextCapstoneText} numberOfLines={1}>
-                Next: {nextTask.title}
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* ================= 2. Skill Matrix ================= */}
-        <View style={styles.matrixHeaderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.matrixSectionTitle}>Skill Matrix</Text>
-            <Text style={styles.matrixSectionSubtitle}>
-              Extracted from your CV and confirmed by you
-            </Text>
-          </View>
-
-          <View style={styles.w12Badge}>
-            <Text style={styles.w12BadgeText}>
-              {stats.currentSkills.length}{"\n"}Skills
-            </Text>
-          </View>
-        </View>
-
-        {stats.currentSkills.length === 0 ? (
-          <EmptyCard
-            icon="award"
-            title="No skills on your profile yet"
-            message="Upload your CV and our AI will extract your skills automatically."
-            ctaLabel="Upload CV"
-            onPress={() => router.push("/profile-settings")}
-          />
-        ) : (
-          stats.currentSkills.map((skill) => {
-            const required = requiredSet.has(skill.toLowerCase());
-            return (
-              <View key={skill} style={styles.card}>
-                <View style={styles.badgeTopRow}>
-                  <View style={styles.badgeIconWrap}>
-                    <MaterialCommunityIcons name={skillIcon(skill)} size={20} color="#731F94" />
-                  </View>
-
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <View style={styles.badgeTitleRow}>
-                      <Text style={styles.badgeTitle}>{titleCase(skill)}</Text>
-                      {required && <Ionicons name="checkmark-circle" size={13} color="#731F94" />}
-                    </View>
-                    <Text style={styles.badgeValidationText}>
-                      {required
-                        ? `Required for ${stats.targetRole || "your target role"}`
-                        : "Transferable skill"}
-                    </Text>
-                  </View>
-
-                  <View style={styles.scoreWrap}>
-                    <Text style={styles.masteryLabel}>{required ? "CORE" : "BONUS"}</Text>
-                  </View>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refresh}
+              tintColor="#731F94"
+            />
+          }
+        >
+          {/* ================= 1. User Identity Hero Card ================= */}
+          <View style={styles.heroCard}>
+            {/* User Row */}
+            <View style={styles.heroUserRow}>
+              <View style={styles.avatarWrap}>
+                <View style={styles.avatarCircle} />
+                <View style={styles.avatarGradCapBadge}>
+                  <Ionicons name="school" size={11} color="#FFFFFF" />
                 </View>
               </View>
-            );
-          })
-        )}
 
-        {/* In-progress learning (like the "active badge" card) */}
-        {learning.map((p) => (
-          <View key={p.id} style={styles.card}>
-            <View style={styles.badgeTopRow}>
-              <View style={styles.badgeIconWrap}>
-                <MaterialCommunityIcons name="laptop" size={20} color="#731F94" />
+              <View style={styles.heroMetaCol}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.heroName}>
+                    {stats.fullName || "Your Name"}
+                  </Text>
+                  {data?.me?.isVerified && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#731F94"
+                      style={{ marginLeft: 6 }}
+                    />
+                  )}
+                </View>
+                <Text style={styles.heroSubtitle}>
+                  {stats.targetRole ||
+                    profile.education ||
+                    data?.me?.email ||
+                    ""}
+                </Text>
+              </View>
+            </View>
+
+            {/* Hire-Ready Banner */}
+            <View style={styles.hireReadyBox}>
+              <View style={styles.hireReadyNumberWrap}>
+                <Text style={styles.hireReadyPercent}>{stats.readiness}</Text>
+                <Text style={styles.hireReadyPercentSymbol}>%</Text>
               </View>
 
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.badgeTitle}>{p.recommendation?.title || "Learning resource"}</Text>
-                <Text style={styles.badgeValidationText}>
-                  {p.recommendation?.skill?.name || "In progress"}
+              <View style={styles.hireReadyMetaCol}>
+                <Text style={styles.hireReadyLabel}>
+                  {tierFor(stats.readiness)}
+                </Text>
+                <Text style={styles.hireReadyCohortText}>
+                  {stats.missingSkills.length
+                    ? `${stats.missingSkills.length} skill gap${stats.missingSkills.length > 1 ? "s" : ""} remaining`
+                    : stats.hasGap
+                      ? "No critical gaps"
+                      : "Upload your CV to get scored"}
                 </Text>
               </View>
 
-              <View style={styles.scoreWrap}>
-                <Text style={styles.scoreBig}>{p.progressPercentage || 0}%</Text>
-                <Text style={styles.activeLabel}>ACTIVE</Text>
+              <Feather name="trending-up" size={18} color="#731F94" />
+            </View>
+
+            {/* Velocity Progress Bar */}
+            <View style={styles.velocityRow}>
+              <View style={styles.velocityLabelWrap}>
+                <MaterialCommunityIcons
+                  name="speedometer"
+                  size={14}
+                  color="#731F94"
+                />
+                <Text style={styles.velocityText}>
+                  {stats.hasRoadmap
+                    ? `Roadmap: Day ${stats.dayNumber} of 90`
+                    : "Roadmap not started"}
+                </Text>
               </View>
+              <Text style={styles.badgesCountText}>
+                {stats.doneTasks} of {stats.tasks.length} Tasks
+              </Text>
             </View>
 
             <View style={styles.velocityTrack}>
-              <View style={[styles.velocityFill, { width: `${p.progressPercentage || 0}%` }]} />
+              <View
+                style={[styles.velocityFill, { width: `${stats.taskPct}%` }]}
+              />
             </View>
 
-            <View style={styles.activeCardFooter}>
-              <View />
-              <TouchableOpacity
-                style={styles.resumeModuleRow}
-                onPress={() => router.push("/(tabs)/learn")}
-              >
-                <Text style={styles.resumeModuleText}>Resume</Text>
-                <Feather name="arrow-right" size={13} color="#731F94" />
-              </TouchableOpacity>
+            {/* Sub-stats */}
+            <View style={styles.streakSubRow}>
+              <View style={styles.streakWrap}>
+                <MaterialCommunityIcons name="fire" size={14} color="#731F94" />
+                <Text style={styles.streakText}>
+                  {stats.completedProgress} resource
+                  {stats.completedProgress === 1 ? "" : "s"} completed
+                </Text>
+              </View>
+              {!!nextTask && (
+                <Text style={styles.nextCapstoneText} numberOfLines={1}>
+                  Next: {nextTask.title}
+                </Text>
+              )}
             </View>
           </View>
-        ))}
 
-        {/* ================= 3. Profile Details ================= */}
-        <View style={styles.credentialContainer}>
-          <View style={styles.credentialTopHeader}>
-            <View style={styles.qrIconSquare}>
-              <Feather name="user" size={20} color="#731F94" />
+          {/* ================= 2. Skill Matrix ================= */}
+          <View style={styles.matrixHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.matrixSectionTitle}>Skill Matrix</Text>
+              <Text style={styles.matrixSectionSubtitle}>
+                Extracted from your CV and confirmed by you
+              </Text>
             </View>
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={styles.credTitle}>Profile Details</Text>
-              <Text style={styles.credSub}>
-                {latestCv ? `CV: ${latestCv.fileName}` : "NO CV UPLOADED"}
+
+            <View style={styles.w12Badge}>
+              <Text style={styles.w12BadgeText}>
+                {stats.currentSkills.length}
+                {"\n"}Skills
               </Text>
             </View>
           </View>
 
-          {!!profile.bio && <Text style={styles.detailBio}>{profile.bio}</Text>}
-
-          {details.length === 0 ? (
-            <Text style={styles.detailEmpty}>
-              Your profile is empty. Add your details in Profile Settings.
-            </Text>
+          {stats.currentSkills.length === 0 ? (
+            <EmptyCard
+              icon="award"
+              title="No skills on your profile yet"
+              message="Upload your CV and our AI will extract your skills automatically."
+              ctaLabel="Upload CV"
+              onPress={() => router.push("/profile-settings")}
+            />
           ) : (
-            details.map((d) => (
-              <View key={d.label} style={styles.detailRow}>
-                <Feather name={d.icon} size={14} color="#731F94" />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.detailLabel}>{d.label}</Text>
-                  <Text style={styles.detailValue}>{d.value}</Text>
+            stats.currentSkills.map((skill) => {
+              const required = requiredSet.has(skill.toLowerCase());
+              return (
+                <View key={skill} style={styles.card}>
+                  <View style={styles.badgeTopRow}>
+                    <View style={styles.badgeIconWrap}>
+                      <MaterialCommunityIcons
+                        name={skillIcon(skill)}
+                        size={20}
+                        color="#731F94"
+                      />
+                    </View>
+
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <View style={styles.badgeTitleRow}>
+                        <Text style={styles.badgeTitle}>
+                          {titleCase(skill)}
+                        </Text>
+                        {required && (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={13}
+                            color="#731F94"
+                          />
+                        )}
+                      </View>
+                      <Text style={styles.badgeValidationText}>
+                        {required
+                          ? `Required for ${stats.targetRole || "your target role"}`
+                          : "Transferable skill"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.scoreWrap}>
+                      <Text style={styles.masteryLabel}>
+                        {required ? "CORE" : "BONUS"}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
 
-          <TouchableOpacity
-            style={styles.dossierBtn}
-            activeOpacity={0.85}
-            onPress={() => router.push("/profile-settings")}
-          >
-            <Feather name="edit-2" size={15} color="#731F94" />
-            <Text style={styles.dossierBtnText}>
-              {latestCv ? "Edit Profile & Replace CV" : "Edit Profile & Upload CV"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+          {/* In-progress learning (like the "active badge" card) */}
+          {learning.map((p) => (
+            <View key={p.id} style={styles.card}>
+              <View style={styles.badgeTopRow}>
+                <View style={styles.badgeIconWrap}>
+                  <MaterialCommunityIcons
+                    name="laptop"
+                    size={20}
+                    color="#731F94"
+                  />
+                </View>
 
-        <TouchableOpacity
-          style={styles.profileSettingsBtn}
-          activeOpacity={0.88}
-          onPress={() => router.push("/settings")}
-        >
-          <Text style={styles.profileSettingsBtnText}>Account Settings</Text>
-          <Ionicons name="settings" size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-      </ScrollView>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.badgeTitle}>
+                    {p.recommendation?.title || "Learning resource"}
+                  </Text>
+                  <Text style={styles.badgeValidationText}>
+                    {p.recommendation?.skill?.name || "In progress"}
+                  </Text>
+                </View>
+
+                <View style={styles.scoreWrap}>
+                  <Text style={styles.scoreBig}>
+                    {p.progressPercentage || 0}%
+                  </Text>
+                  <Text style={styles.activeLabel}>ACTIVE</Text>
+                </View>
+              </View>
+
+              <View style={styles.velocityTrack}>
+                <View
+                  style={[
+                    styles.velocityFill,
+                    { width: `${p.progressPercentage || 0}%` },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.activeCardFooter}>
+                <View />
+                <TouchableOpacity
+                  style={styles.resumeModuleRow}
+                  onPress={() => router.push("/(tabs)/learn")}
+                >
+                  <Text style={styles.resumeModuleText}>Resume</Text>
+                  <Feather name="arrow-right" size={13} color="#731F94" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+
+          {/* ================= 3. Profile Details ================= */}
+          <View style={styles.credentialContainer}>
+            <View style={styles.credentialTopHeader}>
+              <View style={styles.qrIconSquare}>
+                <Feather name="user" size={20} color="#731F94" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.credTitle}>Profile Details</Text>
+                <Text style={styles.credSub}>
+                  {latestCv ? `CV: ${latestCv.fileName}` : "NO CV UPLOADED"}
+                </Text>
+              </View>
+            </View>
+
+            {!!profile.bio && (
+              <Text style={styles.detailBio}>{profile.bio}</Text>
+            )}
+
+            {details.length === 0 ? (
+              <Text style={styles.detailEmpty}>
+                Your profile is empty. Add your details in Profile Settings.
+              </Text>
+            ) : (
+              details.map((d) => (
+                <View key={d.label} style={styles.detailRow}>
+                  <Feather name={d.icon} size={14} color="#731F94" />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.detailLabel}>{d.label}</Text>
+                    <Text style={styles.detailValue}>{d.value}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+
+            <TouchableOpacity
+              style={styles.dossierBtn}
+              activeOpacity={0.85}
+              onPress={() => router.push("/profile-settings")}
+            >
+              <Feather name="edit-2" size={15} color="#731F94" />
+              <Text style={styles.dossierBtnText}>
+                {latestCv
+                  ? "Edit Profile & Replace CV"
+                  : "Edit Profile & Upload CV"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.profileSettingsBtn}
+            activeOpacity={0.88}
+            onPress={() => router.push("/settings")}
+          >
+            <Text style={styles.profileSettingsBtnText}>Account Settings</Text>
+            <Ionicons name="settings" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </ScrollView>
       )}
     </SafeAreaView>
   );
