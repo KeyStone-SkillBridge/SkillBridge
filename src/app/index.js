@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import { Animated, StatusBar, StyleSheet, Text, View } from "react-native";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import { userService } from "../services/endpoints";
+import { getAppState, getToken } from "../services/session";
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -30,10 +32,28 @@ export default function SplashScreen() {
       const splashDelay = new Promise((resolve) => setTimeout(resolve, 1800));
 
       try {
-        const [hasOnboarded] = await Promise.all([
+        const [hasOnboarded, token] = await Promise.all([
           AsyncStorage.getItem("already_onboarded"),
+          getToken(),
           splashDelay,
         ]);
+
+        // Restore an existing session: verify the token is still valid.
+        if (token) {
+          try {
+            await userService.getMe();
+            const state = await getAppState();
+            router.replace(state.onboardingComplete === false ? "/profile-setup" : "/(tabs)");
+            return;
+          } catch (err) {
+            // 401 → interceptor already cleared the token; anything else
+            // (offline) → still let them in with the cached session.
+            if (err?.response?.status !== 401) {
+              router.replace("/(tabs)");
+              return;
+            }
+          }
+        }
 
         if (hasOnboarded === "true") {
           router.replace("/login");

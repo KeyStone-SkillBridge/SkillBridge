@@ -1,12 +1,14 @@
 import {
   Feather,
-  FontAwesome5,
   Ionicons,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -18,18 +20,91 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import LogoSvg from "../../../assets/images/logo.svg";
 import NotificationBell from "../../../assets/images/Notifications.svg";
+import { EmptyCard, LoadingState } from "../../components/StateViews";
+import { getErrorMessage } from "../../services/api";
+import { addSkillToRoadmap, skillIcon } from "../../services/skillActions";
+import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+
+const norm = (s) => String(s || "").trim().toLowerCase();
 
 export default function SkillGapScreen() {
   const router = useRouter();
+  const { data, stats, loading, refreshing, refresh } = useSkillBridge();
   const [selectedFilter, setSelectedFilter] = useState("All");
+  const [addingSkill, setAddingSkill] = useState(null);
+  const [addedSkills, setAddedSkills] = useState({});
+
+  const gap = data?.latestGap;
+  const requiredSet = new Set(stats.requiredSkills.map(norm));
+  const readySkills = stats.requiredSkills.length
+    ? stats.matchedSkills
+    : stats.currentSkills;
+  const partialSkills = stats.requiredSkills.length
+    ? stats.currentSkills.filter((s) => !requiredSet.has(norm(s)))
+    : [];
+  const gapSkills = stats.missingSkills;
+  const totalCount = readySkills.length + partialSkills.length + gapSkills.length;
+
+  const show = (section) => selectedFilter === "All" || selectedFilter === section;
 
   // Overall Circular Progress Specs
   const circleSize = 64;
   const strokeWidth = 5;
   const radius = (circleSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const readinessValue = 0.74;
+  const readinessValue = stats.readiness / 100;
   const strokeDashoffset = circumference - circumference * readinessValue;
+
+  const topMatchPct = data?.matches?.[0]?.matchPercentage;
+
+  const handleAddToRoadmap = async (skill) => {
+    setAddingSkill(skill);
+    try {
+      const { savedTo } = await addSkillToRoadmap(skill, data);
+      setAddedSkills((prev) => ({ ...prev, [skill]: true }));
+      Alert.alert(
+        "Added to your plan",
+        savedTo === "roadmap"
+          ? `"${titleCase(skill)}" was added to the first 30 days of your roadmap.`
+          : `"${titleCase(skill)}" was saved to your plan. It will appear on your Roadmap tab.`,
+      );
+    } catch (err) {
+      Alert.alert("Couldn't add skill", getErrorMessage(err));
+    } finally {
+      setAddingSkill(null);
+    }
+  };
+
+  const renderSkillCard = (skill, variant) => (
+    <View key={`${variant}-${skill}`} style={styles.skillCard}>
+      <View style={styles.skillTopRow}>
+        <View style={styles.skillIconBox}>
+          <MaterialCommunityIcons name={skillIcon(skill)} size={18} color="#731F94" />
+        </View>
+        <View style={styles.skillHeaderCol}>
+          <Text style={styles.skillItemTitle}>{titleCase(skill)}</Text>
+          <Text style={styles.skillItemSubtitle}>
+            {variant === "ready"
+              ? stats.targetRole
+                ? `Required for ${stats.targetRole}`
+                : "Extracted from your CV"
+              : "Transferable skill"}
+          </Text>
+        </View>
+        <Text style={styles.skillPercentText}>
+          {variant === "ready" ? "Ready" : "Bonus"}
+        </Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <View
+          style={[
+            styles.progressFill,
+            { width: variant === "ready" ? "100%" : "60%" },
+          ]}
+        />
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -58,30 +133,40 @@ export default function SkillGapScreen() {
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Loading your skill analysis..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
+        }
       >
         {/* ================= User Profile Identity Card ================= */}
         <View style={styles.profileCard}>
           <View style={styles.profileTopRow}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatarCircle} />
-              <View style={styles.avatarCheckBadge}>
-                <Ionicons name="checkmark" size={10} color="#FFFFFF" />
-              </View>
+              {gap?.status === "completed" && (
+                <View style={styles.avatarCheckBadge}>
+                  <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                </View>
+              )}
             </View>
 
             <View style={styles.profileMeta}>
-              <Text style={styles.profileName}>Amaka Okafor</Text>
-              <Text style={styles.profileEducation}>
-                Economics & Statistics
+              <Text style={styles.profileName}>{stats.fullName || "Your Profile"}</Text>
+              <Text style={styles.profileEducation} numberOfLines={1}>
+                {data?.profile?.education || "Add your education in Profile"}
               </Text>
             </View>
 
-            <View style={styles.hubPill}>
-              <Text style={styles.hubPillText}>Lagos Hub</Text>
-            </View>
+            {!!stats.location && (
+              <View style={styles.hubPill}>
+                <Text style={styles.hubPillText} numberOfLines={1}>{stats.location}</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.profileBottomRow}>
@@ -91,21 +176,41 @@ export default function SkillGapScreen() {
                 size={14}
                 color="#731F94"
               />
-              <Text style={styles.roleTagText}>Junior Data Analyst</Text>
+              <Text style={styles.roleTagText}>
+                {stats.targetRole || "No target role yet"}
+              </Text>
             </View>
 
             <View style={styles.specBadge}>
-              <Text style={styles.specBadgeText}>Verified Spec</Text>
+              <Text style={styles.specBadgeText}>
+                {gap?.status === "completed"
+                  ? "AI Verified"
+                  : gap?.status === "failed"
+                    ? "Analysis Failed"
+                    : gap
+                      ? "Pending"
+                      : "Not Analysed"}
+              </Text>
             </View>
           </View>
         </View>
 
+        {!gap ? (
+          <EmptyCard
+            icon="file-text"
+            title="No skill analysis yet"
+            message="Upload your CV and set a target role so our AI can benchmark your skills."
+            ctaLabel="Start Analysis"
+            onPress={() => router.push("/profile-setup")}
+          />
+        ) : (
+          <>
         {/* ================= Overall Market Fit Card ================= */}
         <View style={styles.marketFitCard}>
           <View style={styles.fitLeftCol}>
             <Text style={styles.marketFitOverline}>OVERALL MARKET FIT</Text>
             <View style={styles.readinessRow}>
-              <Text style={styles.readinessBigText}>74%</Text>
+              <Text style={styles.readinessBigText}>{stats.readiness}%</Text>
               <Text style={styles.readinessLabel}>Readiness</Text>
             </View>
           </View>
@@ -135,257 +240,151 @@ export default function SkillGapScreen() {
               />
             </Svg>
             <View style={styles.gaugeInnerLabel}>
-              <Text style={styles.gaugeDeltaText}>+6%</Text>
+              <Text style={styles.gaugeDeltaText}>
+                {stats.requiredSkills.length
+                  ? `${stats.matchedSkills.length}/${stats.requiredSkills.length}`
+                  : `${stats.currentSkills.length}`}
+              </Text>
             </View>
           </View>
         </View>
+
+        {!!stats.summary && (
+          <View style={styles.summaryCard}>
+            <MaterialCommunityIcons name="creation" size={16} color="#731F94" />
+            <Text style={styles.summaryText}>{stats.summary}</Text>
+          </View>
+        )}
 
         {/* ================= Filter Segmented Pills ================= */}
         <View style={styles.filterPillTrack}>
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              selectedFilter === "All" && styles.filterPillActive,
-            ]}
-            onPress={() => setSelectedFilter("All")}
-          >
-            <Text
+          {[
+            { key: "All", count: totalCount },
+            { key: "Ready", count: readySkills.length },
+            { key: "Partial", count: partialSkills.length },
+            { key: "Gaps", count: gapSkills.length },
+          ].map((f) => (
+            <TouchableOpacity
+              key={f.key}
               style={[
-                styles.filterPillText,
-                selectedFilter === "All" && styles.filterPillTextActive,
+                styles.filterPill,
+                selectedFilter === f.key && styles.filterPillActive,
               ]}
+              onPress={() => setSelectedFilter(f.key)}
             >
-              All <Text style={styles.filterPillCount}>(14)</Text>
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              selectedFilter === "Ready" && styles.filterPillActive,
-            ]}
-            onPress={() => setSelectedFilter("Ready")}
-          >
-            <Text style={styles.filterPillText}>
-              Ready <Text style={styles.purpleCount}>8</Text>
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              selectedFilter === "Partial" && styles.filterPillActive,
-            ]}
-            onPress={() => setSelectedFilter("Partial")}
-          >
-            <Text style={styles.filterPillText}>
-              Partial <Text style={styles.purpleCount}>4</Text>
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              selectedFilter === "Gaps" && styles.filterPillActive,
-            ]}
-            onPress={() => setSelectedFilter("Gaps")}
-          >
-            <Text style={styles.filterPillText}>
-              Gaps <Text style={styles.purpleCount}>2</Text>
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.filterPillText,
+                  selectedFilter === f.key && styles.filterPillTextActive,
+                ]}
+              >
+                {f.key}{" "}
+                <Text style={f.key === "All" ? styles.filterPillCount : styles.purpleCount}>
+                  {f.key === "All" ? `(${f.count})` : f.count}
+                </Text>
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* ================= Section 1: Possessed Core Skills ================= */}
-        <View style={styles.sectionHeaderRow}>
-          <View style={styles.sectionTitleWithDot}>
-            <View style={styles.sectionDot} />
-            <Text style={styles.sectionTitle}>Possessed Core Skills</Text>
-          </View>
-          <Text style={styles.sectionCountLabel}>8 Verified</Text>
-        </View>
-
-        {/* B.Sc Economics */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <Ionicons name="school-outline" size={18} color="#731F94" />
+        {show("Ready") && (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionTitleWithDot}>
+                <View style={styles.sectionDot} />
+                <Text style={styles.sectionTitle}>Possessed Core Skills</Text>
+              </View>
+              <Text style={styles.sectionCountLabel}>{readySkills.length} Verified</Text>
             </View>
-            <Text style={styles.skillItemTitle}>
-              B.Sc Economics & Statistics
-            </Text>
-            <Text style={styles.skillPercentText}>94%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "94%" }]} />
-          </View>
-        </View>
-
-        {/* Advanced MS Excel */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <MaterialCommunityIcons
-                name="table-large"
-                size={18}
-                color="#731F94"
-              />
-            </View>
-            <View style={styles.skillHeaderCol}>
-              <Text style={styles.skillItemTitle}>
-                Advanced MS Excel & Pivot Tables
+            {readySkills.length === 0 ? (
+              <Text style={styles.emptySectionText}>
+                None of the required skills were found yet — check the gaps below.
               </Text>
-              <Text style={styles.skillItemSubtitle}>
-                92% Lagos Fintech benchmark
-              </Text>
-            </View>
-            <Text style={styles.skillPercentText}>92%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "92%" }]} />
-          </View>
-        </View>
-
-        {/* Financial Modeling */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <FontAwesome5 name="university" size={15} color="#731F94" />
-            </View>
-            <View style={styles.skillHeaderCol}>
-              <Text style={styles.skillItemTitle}>
-                Financial Modeling & Valuation
-              </Text>
-              <Text style={styles.skillItemSubtitle}>
-                Aligned with Sterling & Stanbic IBTC specs
-              </Text>
-            </View>
-            <Text style={styles.skillPercentText}>88%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "88%" }]} />
-          </View>
-        </View>
-
-        {/* Data Storytelling */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <Feather name="trending-up" size={16} color="#731F94" />
-            </View>
-            <View style={styles.skillHeaderCol}>
-              <Text style={styles.skillItemTitle}>
-                Data Storytelling & Reporting
-              </Text>
-              <Text style={styles.skillItemSubtitle}>
-                Executive dashboard synthesis
-              </Text>
-            </View>
-            <Text style={styles.skillPercentText}>78%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "78%" }]} />
-          </View>
-        </View>
+            ) : (
+              readySkills.map((s) => renderSkillCard(s, "ready"))
+            )}
+          </>
+        )}
 
         {/* ================= Section 2: Partial Proficiencies ================= */}
-        <View style={[styles.sectionHeaderRow, { marginTop: 18 }]}>
-          <View style={styles.sectionTitleWithDot}>
-            <View style={styles.sectionDot} />
-            <Text style={styles.sectionTitle}>Partial Proficiencies</Text>
-          </View>
-          <Text style={styles.sectionCountLabel}>4 Developing</Text>
-        </View>
-
-        {/* SQL Window Functions */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <MaterialCommunityIcons
-                name="database-outline"
-                size={18}
-                color="#731F94"
-              />
+        {show("Partial") && partialSkills.length > 0 && (
+          <>
+            <View style={[styles.sectionHeaderRow, { marginTop: 18 }]}>
+              <View style={styles.sectionTitleWithDot}>
+                <View style={styles.sectionDot} />
+                <Text style={styles.sectionTitle}>Transferable Skills</Text>
+              </View>
+              <Text style={styles.sectionCountLabel}>{partialSkills.length} Extra</Text>
             </View>
-            <View style={styles.skillHeaderCol}>
-              <Text style={styles.skillItemTitle}>SQL Window Functions</Text>
-              <Text style={styles.skillItemSubtitle}>
-                Sprint 2 • Active Course
-              </Text>
-            </View>
-            <Text style={styles.skillPercentText}>65%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "65%" }]} />
-          </View>
-        </View>
-
-        {/* PowerBI Dashboard Design */}
-        <View style={styles.skillCard}>
-          <View style={styles.skillTopRow}>
-            <View style={styles.skillIconBox}>
-              <MaterialCommunityIcons
-                name="chart-pie"
-                size={18}
-                color="#731F94"
-              />
-            </View>
-            <View style={styles.skillHeaderCol}>
-              <Text style={styles.skillItemTitle}>
-                PowerBI Dashboard Design
-              </Text>
-              <Text style={styles.skillItemSubtitle}>
-                2 practice labs remaining
-              </Text>
-            </View>
-            <Text style={styles.skillPercentText}>70%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: "70%" }]} />
-          </View>
-        </View>
+            {partialSkills.map((s) => renderSkillCard(s, "partial"))}
+          </>
+        )}
 
         {/* ================= Section 3: Critical Missing Gaps ================= */}
-        <View style={[styles.sectionHeaderRow, { marginTop: 18 }]}>
-          <View style={styles.sectionTitleWithDot}>
-            <View style={styles.sectionDot} />
-            <Text style={styles.sectionTitle}>Critical Missing Gaps</Text>
-          </View>
-          <Text style={styles.highImpactLabel}>High Impact</Text>
-        </View>
-
-        {/* Python Data Wrangling Gap Card */}
-        <View style={styles.criticalGapCard}>
-          <View style={styles.gapHeaderRow}>
-            <View style={styles.gapIconBox}>
-              <Feather name="code" size={16} color="#731F94" />
-            </View>
-            <View style={styles.gapHeaderInfo}>
-              <Text style={styles.gapTitle}>Python Data Wrangling</Text>
-              <Text style={styles.gapSubtitle}>
-                Pandas & NumPy fundamentals
+        {show("Gaps") && (
+          <>
+            <View style={[styles.sectionHeaderRow, { marginTop: 18 }]}>
+              <View style={styles.sectionTitleWithDot}>
+                <View style={styles.sectionDot} />
+                <Text style={styles.sectionTitle}>Critical Missing Gaps</Text>
+              </View>
+              <Text style={styles.highImpactLabel}>
+                {gapSkills.length ? "High Impact" : "All clear"}
               </Text>
             </View>
-            <View style={styles.rolesPill}>
-              <Text style={styles.rolesPillText}>Found in 88% roles</Text>
-            </View>
-          </View>
 
-          <View style={styles.gapFooterRow}>
-            <Text style={styles.unlocksText}>
-              Unlocks 14 Lagos Junior Roles
-            </Text>
+            {gapSkills.length === 0 ? (
+              <Text style={styles.emptySectionText}>
+                No critical gaps found for {stats.targetRole || "your target role"}. 🎉
+              </Text>
+            ) : (
+              gapSkills.map((skill) => (
+                <View key={`gap-${skill}`} style={styles.criticalGapCard}>
+                  <View style={styles.gapHeaderRow}>
+                    <View style={styles.gapIconBox}>
+                      <MaterialCommunityIcons name={skillIcon(skill)} size={16} color="#731F94" />
+                    </View>
+                    <View style={styles.gapHeaderInfo}>
+                      <Text style={styles.gapTitle}>{titleCase(skill)}</Text>
+                      <Text style={styles.gapSubtitle}>
+                        Required for {stats.targetRole || "your target role"}
+                      </Text>
+                    </View>
+                  </View>
 
-            <TouchableOpacity
-              style={styles.addRoadmapBtn}
-              activeOpacity={0.85}
-              onPress={() => router.push("/(tabs)/learn")}
-            >
-              <Ionicons name="add" size={15} color="#FFFFFF" />
-              <Text style={styles.addRoadmapText}>Add to 60–Day Roadmap</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+                  <View style={styles.gapFooterRow}>
+                    <TouchableOpacity onPress={() => router.push("/(tabs)/learn")}>
+                      <Text style={styles.unlocksText}>Find courses →</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.addRoadmapBtn, addedSkills[skill] && { opacity: 0.6 }]}
+                      activeOpacity={0.85}
+                      disabled={!!addingSkill || addedSkills[skill]}
+                      onPress={() => handleAddToRoadmap(skill)}
+                    >
+                      {addingSkill === skill ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={addedSkills[skill] ? "checkmark" : "add"}
+                            size={15}
+                            color="#FFFFFF"
+                          />
+                          <Text style={styles.addRoadmapText}>
+                            {addedSkills[skill] ? "Added" : "Add to Roadmap"}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </>
+        )}
 
         {/* ================= Section 4: Benchmark Matrix Card ================= */}
         <View style={styles.benchmarkCard}>
@@ -398,44 +397,56 @@ export default function SkillGapScreen() {
               />
             </View>
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={styles.benchmarkTitle}>
-                Nigeria Fintech Benchmark Matrix
+              <Text style={styles.benchmarkTitle}>Benchmark Matrix</Text>
+              <Text style={styles.benchmarkSubtitle}>
+                {stats.targetRole || "Target role"} entry standards
               </Text>
-              <Text style={styles.benchmarkSubtitle}>Entry Standards</Text>
             </View>
           </View>
 
           {/* Bar 1: Current Profile */}
           <View style={styles.benchmarkRow}>
             <Text style={styles.benchmarkRowLabel}>
-              Amaka Okafor (Current Profile)
+              {stats.firstName} (Current Profile)
             </Text>
-            <Text style={styles.benchmarkRowValue}>74%</Text>
+            <Text style={styles.benchmarkRowValue}>{stats.readiness}%</Text>
           </View>
           <View style={styles.benchmarkTrack}>
-            <View style={[styles.benchmarkFillPurple, { width: "74%" }]} />
+            <View style={[styles.benchmarkFillPurple, { width: `${stats.readiness}%` }]} />
           </View>
 
-          {/* Bar 2: Market Readiness */}
+          {/* Bar 2: Required skills covered */}
           <View style={styles.benchmarkRow}>
-            <Text style={styles.benchmarkRowLabel}>
-              Market Readiness Threshold
+            <Text style={styles.benchmarkRowLabel}>Required Skills Covered</Text>
+            <Text style={styles.benchmarkRowValue}>
+              {stats.matchedSkills.length}/{stats.requiredSkills.length || 0}
             </Text>
-            <Text style={styles.benchmarkRowValue}>65%</Text>
           </View>
           <View style={styles.benchmarkTrack}>
-            <View style={[styles.benchmarkFillLightPurple, { width: "65%" }]} />
+            <View
+              style={[
+                styles.benchmarkFillLightPurple,
+                {
+                  width: `${stats.requiredSkills.length ? Math.round((stats.matchedSkills.length / stats.requiredSkills.length) * 100) : 0}%`,
+                },
+              ]}
+            />
           </View>
 
-          {/* Bar 3: Peer Average */}
+          {/* Bar 3: Best job match */}
           <View style={styles.benchmarkRow}>
-            <Text style={styles.benchmarkRowLabel}>
-              UNILAG Econs/Stats Peer Average
+            <Text style={styles.benchmarkRowLabel}>Best Job Match</Text>
+            <Text style={styles.benchmarkRowValue}>
+              {typeof topMatchPct === "number" ? `${topMatchPct}%` : "—"}
             </Text>
-            <Text style={styles.benchmarkRowValue}>62%</Text>
           </View>
           <View style={styles.benchmarkTrack}>
-            <View style={[styles.benchmarkFillGray, { width: "62%" }]} />
+            <View
+              style={[
+                styles.benchmarkFillGray,
+                { width: `${typeof topMatchPct === "number" ? topMatchPct : 0}%` },
+              ]}
+            />
           </View>
 
           {/* Benchmark Footer */}
@@ -443,19 +454,23 @@ export default function SkillGapScreen() {
             <View style={styles.percentileGroup}>
               <Feather name="shield" size={13} color="#731F94" />
               <Text style={styles.percentileText}>
-                Top 8th Percentile in Lagos Cohort
+                {gapSkills.length
+                  ? `${gapSkills.length} skill${gapSkills.length > 1 ? "s" : ""} to job-ready`
+                  : "Job-ready for your target"}
               </Text>
             </View>
 
             <TouchableOpacity
               style={styles.fullMatrixBtn}
-              onPress={() => router.push("/(tabs)/learn")}
+              onPress={() => router.push("/(tabs)/roadmap")}
             >
-              <Text style={styles.fullMatrixText}>Full Matrix</Text>
+              <Text style={styles.fullMatrixText}>View Roadmap</Text>
               <Feather name="arrow-right" size={12} color="#731F94" />
             </TouchableOpacity>
           </View>
         </View>
+          </>
+        )}
 
         {/* ================= Bottom Career Launch Action ================= */}
         <TouchableOpacity
@@ -467,11 +482,32 @@ export default function SkillGapScreen() {
           <Feather name="arrow-right" size={18} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  summaryCard: {
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: "#F5EEFC",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#3C303B",
+  },
+  emptySectionText: {
+    fontSize: 12,
+    color: "#7B6F84",
+    marginBottom: 10,
+    lineHeight: 17,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

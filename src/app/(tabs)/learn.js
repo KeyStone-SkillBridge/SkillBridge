@@ -1,13 +1,15 @@
 import {
   Feather,
-  FontAwesome5,
   Ionicons,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  Linking,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -18,18 +20,84 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import LogoSvg from "../../../assets/images/logo.svg";
+import { EmptyCard, LoadingState } from "../../components/StateViews";
+import { getErrorMessage } from "../../services/api";
+import { setLearningProgress, startLearning } from "../../services/skillActions";
+import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+
+const DIFFICULTY_LABEL = { beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced" };
 
 export default function LearnScreen() {
   const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState("modules"); // 'modules' | 'certs'
+  const { data, stats, loading, refreshing, refresh, reload } = useSkillBridge();
+  const [activeFilter, setActiveFilter] = useState("modules"); // 'modules' | 'projects'
+  const [busyId, setBusyId] = useState(null);
 
-  // 4/6 Pathway Gauge
+  const progress = data?.progress || [];
+  const recs = data?.recommendations || [];
+  const progressByRec = {};
+  progress.forEach((p) => {
+    progressByRec[String(p.recommendationId)] = p;
+  });
+
+  const resources = recs.filter((r) => r.type !== "project");
+  const projects = recs.filter((r) => r.type === "project");
+  const visible = activeFilter === "modules" ? resources : projects;
+
+  const tracked = progress.length;
+  const completed = progress.filter((p) => p.status === "completed");
+  const active =
+    progress
+      .filter((p) => p.status === "in_progress")
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] || null;
+  const hoursLogged = completed.reduce(
+    (sum, p) => sum + (p.recommendation?.estimatedHours || 0),
+    0,
+  );
+  const pathwayPct = tracked ? Math.round((completed.length / tracked) * 100) : 0;
+
+  // Pathway Gauge
   const circleSize = 52;
   const strokeWidth = 4.5;
   const radius = (circleSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const pathwayRatio = 4 / 6;
-  const strokeDashoffset = circumference - circumference * pathwayRatio;
+  const strokeDashoffset = circumference - circumference * (pathwayPct / 100);
+
+  const openUrl = (url) => {
+    if (!url) {
+      Alert.alert("No link", "This resource doesn't have a link yet.");
+      return;
+    }
+    Linking.openURL(url).catch(() => Alert.alert("Couldn't open link", url));
+  };
+
+  const searchSkill = (skill) =>
+    openUrl(`https://www.google.com/search?q=${encodeURIComponent(`learn ${skill} free course`)}`);
+
+  const handleStart = async (rec) => {
+    setBusyId(`rec-${rec.id}`);
+    try {
+      await startLearning(rec.id);
+      await reload();
+      if (rec.url) openUrl(rec.url);
+    } catch (err) {
+      Alert.alert("Couldn't start tracking", getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleProgress = async (record, pct) => {
+    setBusyId(`prog-${record.id}`);
+    try {
+      await setLearningProgress(record.id, pct);
+      await reload();
+    } catch (err) {
+      Alert.alert("Couldn't update progress", getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -59,22 +127,28 @@ export default function LearnScreen() {
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Loading your learning plan..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
+        }
       >
         {/* ================= Breadcrumb & Title ================= */}
         <View style={styles.titleSection}>
           <View style={{ flex: 1 }}>
             <Text style={styles.breadcrumbText}>
-              PATHWAYS & BADGES{" "}
-              <Text style={styles.breadcrumbSub}>› Fintech Core</Text>
+              PATHWAYS & RESOURCES{" "}
+              <Text style={styles.breadcrumbSub}>› Personalised</Text>
             </Text>
-            <Text style={styles.pageTitle}>Learning & Certs</Text>
+            <Text style={styles.pageTitle}>Learning</Text>
             <Text style={styles.targetTrackText}>
               Target Track:{" "}
               <Text style={styles.targetTrackValue}>
-                Junior Fintech Data Analyst
+                {stats.targetRole || "Not set"}
               </Text>
             </Text>
           </View>
@@ -88,13 +162,13 @@ export default function LearnScreen() {
           </View>
         </View>
 
-        {/* ================= 1. Certification Pathway Card ================= */}
+        {/* ================= 1. Learning Pathway Card ================= */}
         <View style={styles.card}>
           <View style={styles.pathwayTopRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.pathwayOverline}>CERTIFICATION PATHWAY</Text>
+              <Text style={styles.pathwayOverline}>LEARNING PATHWAY</Text>
               <View style={styles.percentRow}>
-                <Text style={styles.percentBig}>65%</Text>
+                <Text style={styles.percentBig}>{pathwayPct}%</Text>
                 <Text style={styles.percentLabel}>Completed</Text>
               </View>
             </View>
@@ -124,543 +198,291 @@ export default function LearnScreen() {
                 />
               </Svg>
               <View style={styles.gaugeCenterLabel}>
-                <Text style={styles.gaugeFractionText}>4/6</Text>
+                <Text style={styles.gaugeFractionText}>
+                  {completed.length}/{tracked}
+                </Text>
               </View>
             </View>
           </View>
 
           {/* Progress Bar */}
           <View style={styles.pathwayBarTrack}>
-            <View style={styles.pathwayBarFill} />
+            <View style={[styles.pathwayBarFill, { width: `${pathwayPct}%` }]} />
           </View>
 
           {/* Key Metric Counters */}
           <View style={styles.pathwayMetricsRow}>
             <View style={styles.metricItem}>
               <Ionicons name="checkmark-circle" size={15} color="#731F94" />
-              <Text style={styles.metricText}>4 of 6 Modules Done</Text>
+              <Text style={styles.metricText}>
+                {completed.length} of {tracked} Done
+              </Text>
             </View>
             <View style={styles.metricItem}>
-              <Ionicons name="ribbon-outline" size={15} color="#731F94" />
-              <Text style={styles.metricText}>2 Certifications Earned</Text>
+              <Ionicons name="play-circle-outline" size={15} color="#731F94" />
+              <Text style={styles.metricText}>
+                {stats.inProgress.length} In Progress
+              </Text>
             </View>
           </View>
 
-          {/* Streak Banner */}
+          {/* Hours Banner */}
           <View style={styles.streakBanner}>
             <View style={styles.streakLeft}>
               <MaterialCommunityIcons name="fire" size={16} color="#731F94" />
-              <Text style={styles.streakBold}>12–Day Study Streak</Text>
+              <Text style={styles.streakBold}>
+                {stats.missingSkills.length} skill gap{stats.missingSkills.length === 1 ? "" : "s"} to close
+              </Text>
             </View>
             <View style={styles.streakDot} />
-            <Text style={styles.streakHoursText}>
-              18.5 hrs logged this sprint
-            </Text>
+            <Text style={styles.streakHoursText}>{hoursLogged} hrs completed</Text>
           </View>
         </View>
 
-        {/* ================= 2. Horizontal Filter Tabs ================= */}
-        <View style={styles.filterTabsRow}>
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              activeFilter === "modules" && styles.filterPillActive,
-            ]}
-            onPress={() => setActiveFilter("modules")}
-            activeOpacity={0.85}
-          >
-            <Text
-              style={[
-                styles.filterPillText,
-                activeFilter === "modules" && styles.filterPillTextActive,
-              ]}
-            >
-              Core Modules (6)
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              activeFilter === "certs" && styles.filterPillActive,
-            ]}
-            onPress={() => setActiveFilter("certs")}
-            activeOpacity={0.85}
-          >
-            <Text
-              style={[
-                styles.filterPillText,
-                activeFilter === "certs" && styles.filterPillTextActive,
-              ]}
-            >
-              Industry Certifications (3)
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ================= 3. Active Module 3 Card ================= */}
-        <View style={styles.card}>
-          <View style={styles.moduleBadgesRow}>
-            <View style={styles.activeSprintBadge}>
-              <Text style={styles.activeSprintText}>
-                ACTIVE NOW • SPRINT WK 3
-              </Text>
-            </View>
-
-            <View style={styles.timeEstBadge}>
-              <Feather name="clock" size={12} color="#556070" />
-              <Text style={styles.timeEstText}>45 mins left</Text>
-            </View>
-          </View>
-
-          <Text style={styles.activeModuleTitle}>
-            Module 3: Advanced SQL Window Functions & Ledger Reconciliation
-          </Text>
-
-          <View style={styles.coDevelopedRow}>
-            <FontAwesome5 name="building" size={12} color="#731F94" />
-            <Text style={styles.coDevelopedText}>
-              Co-developed with Flutterwave Engineering
-            </Text>
-          </View>
-
-          {/* Module Progress Checklist Box */}
-          <View style={styles.lessonListBox}>
-            <View style={styles.lessonListHeader}>
-              <Text style={styles.lessonProgressTitle}>Module Progress</Text>
-              <Text style={styles.lessonProgressCount}>
-                3 of 5 lessons done
-              </Text>
-            </View>
-
-            {/* Lesson 3.1 */}
-            <View style={styles.lessonRow}>
-              <Ionicons name="checkmark-circle" size={16} color="#731F94" />
-              <Text style={styles.lessonTitleDone}>
-                3.1: Running Totals & Cumulative Balances
-              </Text>
-              <Text style={styles.lessonDuration}>15m</Text>
-            </View>
-
-            {/* Lesson 3.2 */}
-            <View style={styles.lessonRow}>
-              <Ionicons name="checkmark-circle" size={16} color="#731F94" />
-              <Text style={styles.lessonTitleDone}>
-                3.2: Partitioning by Merchant ID
-              </Text>
-              <Text style={styles.lessonDuration}>20m</Text>
-            </View>
-
-            {/* Lesson 3.3 (Current) */}
-            <View style={[styles.lessonRow, styles.lessonRowCurrent]}>
-              <Ionicons name="radio-button-on" size={16} color="#731F94" />
-              <Text style={styles.lessonTitleCurrent}>
-                3.3: LEAD / LAG for Transaction Latency
-              </Text>
-              <View style={styles.currentBadge}>
-                <Text style={styles.currentBadgeText}>CURRENT</Text>
-              </View>
-            </View>
-
-            {/* Lesson 3.4 (Locked) */}
-            <View style={styles.lessonRow}>
-              <Feather name="lock" size={14} color="#A396A6" />
-              <Text style={styles.lessonTitleLocked}>
-                3.4: Edge Case Reconciliation Simulation
-              </Text>
-              <Text style={styles.lessonDuration}>30m</Text>
-            </View>
-          </View>
-
-          {/* CTAs */}
-          <TouchableOpacity
-            style={styles.resumeModuleBtn}
-            activeOpacity={0.88}
-            onPress={() =>
-              Alert.alert("Cloud Sandbox", "Opening live sandbox terminal...")
-            }
-          >
-            <Ionicons name="terminal" size={16} color="#FFFFFF" />
-            <Text style={styles.resumeModuleBtnText}>
-              Resume Module & Cloud Sandbox
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.lessonNotesBtn}
-            activeOpacity={0.85}
-            onPress={() =>
-              Alert.alert(
-                "Lesson Notes",
-                "Fetching schema definitions and DDL scripts...",
-              )
-            }
-          >
-            <Feather name="file-text" size={15} color="#731F94" />
-            <Text style={styles.lessonNotesBtnText}>
-              View Lesson Notes & Schema DDL
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ================= 4. Upcoming Modules Section ================= */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Upcoming Modules</Text>
-          <Feather name="clock" size={14} color="#556070" />
-        </View>
-
-        {/* Module 4 Card */}
-        <View style={styles.card}>
-          <View style={styles.upcomingBadgeRow}>
-            <View style={styles.moduleNumberPill}>
-              <Text style={styles.moduleNumberText}>Module 4</Text>
-            </View>
-            <Text style={styles.unlocksText}>Unlocks in 2 days</Text>
-          </View>
-
-          <Text style={styles.moduleCardTitle}>
-            Financial Crime & Anomaly Detection with Python Pandas
-          </Text>
-          <Text style={styles.moduleCardDescription}>
-            Identify fraudulent spike heuristics across transaction streams
-            using z-score normalization.
-          </Text>
-
-          <View style={styles.moduleCardFooter}>
-            <View style={styles.metaRow}>
-              <Feather name="clock" size={12} color="#7B6F84" />
-              <Text style={styles.metaText}>4.5 hrs total</Text>
-            </View>
-            <Text style={styles.metaText}>Partner: Moniepoint</Text>
-          </View>
-        </View>
-
-        {/* Module 5 Card */}
-        <View style={styles.card}>
-          <View style={styles.upcomingBadgeRow}>
-            <View style={styles.moduleNumberPill}>
-              <Text style={styles.moduleNumberText}>Module 5</Text>
-            </View>
-            <View style={styles.metaRow}>
-              <Feather name="lock" size={10} color="#7B6F84" />
-              <Text style={styles.metaText}>Prerequisite: Mod 3</Text>
-            </View>
-          </View>
-
-          <Text style={styles.moduleCardTitle}>
-            Automated dbt Data Pipelines for FinTech
-          </Text>
-          <Text style={styles.moduleCardDescription}>
-            Transform raw payment gateway events into verified Kimball
-            dimensional data models.
-          </Text>
-
-          <View style={styles.moduleCardFooter}>
-            <View style={styles.metaRow}>
-              <Feather name="clock" size={12} color="#7B6F84" />
-              <Text style={styles.metaText}>6.0 hrs total</Text>
-            </View>
-            <Text style={styles.metaText}>Live CI/CD testing</Text>
-          </View>
-        </View>
-
-        {/* Available Track Card */}
-        <View style={styles.card}>
-          <View style={styles.upcomingBadgeRow}>
-            <View style={styles.moduleNumberPill}>
-              <Text style={styles.moduleNumberText}>AVAILABLE TRACK</Text>
-            </View>
-            <Feather name="lock" size={14} color="#7B6F84" />
-          </View>
-
-          <Text style={styles.moduleCardTitle}>
-            Advanced Python Financial Engineering
-          </Text>
-          <Text style={styles.moduleCardDescription}>
-            Master algorithmic trade analytics, risk-adjusted returns modeling,
-            and automated reconciliation.
-          </Text>
-
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Requires 4 modules</Text>
-            <View style={styles.streakDot} />
-            <Text style={styles.metaText}>20 hrs hands-on labs</Text>
-          </View>
-        </View>
-
-        {/* ================= 5. Verified Partner Certifications ================= */}
-        <Text style={styles.sectionTitle}>Verified Partner Certifications</Text>
-        <Text style={styles.sectionSubtitle}>
-          Cryptographically signed credentials vetted by Tier-1 FinTechs &
-          Nigerian Commercial Banks.
-        </Text>
-
-        {/* Certificate 1: SQL Specialist (Earned) */}
-        <View style={styles.card}>
-          <View style={styles.certTopRow}>
-            <View style={styles.certIconSquarePurple}>
-              <MaterialCommunityIcons
-                name="certificate"
-                size={24}
-                color="#FFFFFF"
-              />
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.earnedBadge}>
-                <Text style={styles.earnedBadgeText}>EARNED & ACTIVE</Text>
-              </View>
-              <Text style={styles.certTitle}>
-                SkillBridge Certified SQL Data Specialist
-              </Text>
-              <Text style={styles.certSub}>
-                Issued Oct 2024 • UNILAG Deanery Validated
-              </Text>
-            </View>
-          </View>
-
-          {/* Blockchain Node Details */}
-          <View style={styles.blockchainBox}>
-            <View style={styles.blockchainRow}>
-              <Text style={styles.blockchainLabel}>Credential ID</Text>
-              <Text style={styles.blockchainValueBold}>#SKB-9841-A0</Text>
-            </View>
-            <View style={styles.blockchainRow}>
-              <Text style={styles.blockchainLabel}>Verification Node</Text>
-              <Text style={styles.blockchainValue}>
-                Polygon Mainnet (Hash: 0x7b2f...e9)
-              </Text>
-            </View>
-            <View style={styles.verifiedRow}>
-              <Ionicons name="checkmark-circle" size={14} color="#731F94" />
-              <Text style={styles.verifiedText}>
-                Verified on Blockchain & LinkedIn
-              </Text>
-            </View>
-          </View>
-
-          {/* Actions */}
-          <View style={styles.certBtnRow}>
-            <TouchableOpacity
-              style={styles.viewPdfBtn}
-              onPress={() =>
-                Alert.alert(
-                  "Credential",
-                  "Downloading official credential PDF...",
-                )
-              }
-            >
-              <Feather name="download" size={14} color="#731F94" />
-              <Text style={styles.viewPdfText}>View PDF</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.shareBadgeBtn}
-              onPress={() =>
-                Alert.alert("Share", "Sharing verified badge to LinkedIn...")
-              }
-            >
-              <Feather name="share-2" size={14} color="#FFFFFF" />
-              <Text style={styles.shareBadgeText}>Share Badge</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Certificate 2: Lagos Fintech Associate (In Progress) */}
-        <View style={styles.card}>
-          <View style={styles.certTopRow}>
-            <View style={styles.certIconSquareLavender}>
-              <Ionicons name="ribbon-outline" size={24} color="#731F94" />
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.inProgressBadge}>
-                <Text style={styles.inProgressBadgeText}>
-                  IN PROGRESS (80%)
+        {/* ================= 2. Active resource ================= */}
+        {active && (
+          <View style={styles.card}>
+            <View style={styles.moduleBadgesRow}>
+              <View style={styles.activeSprintBadge}>
+                <Text style={styles.activeSprintText}>
+                  ACTIVE NOW • {active.progressPercentage || 0}%
                 </Text>
               </View>
-              <Text style={styles.certTitle}>
-                Lagos Fintech Associate Analytics Certification (Level 1)
+
+              {!!active.recommendation?.estimatedHours && (
+                <View style={styles.timeEstBadge}>
+                  <Feather name="clock" size={12} color="#556070" />
+                  <Text style={styles.timeEstText}>
+                    {active.recommendation.estimatedHours} hrs
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.activeModuleTitle}>
+              {active.recommendation?.title || "Learning resource"}
+            </Text>
+
+            {!!active.recommendation?.skill?.name && (
+              <View style={styles.coDevelopedRow}>
+                <MaterialCommunityIcons name="tag-outline" size={13} color="#731F94" />
+                <Text style={styles.coDevelopedText}>
+                  {active.recommendation.skill.name}
+                  {active.recommendation.difficulty
+                    ? ` • ${DIFFICULTY_LABEL[active.recommendation.difficulty] || active.recommendation.difficulty}`
+                    : ""}
+                </Text>
+              </View>
+            )}
+
+            {/* Progress controls */}
+            <View style={styles.lessonListBox}>
+              <View style={styles.lessonListHeader}>
+                <Text style={styles.lessonProgressTitle}>Update Progress</Text>
+                <Text style={styles.lessonProgressCount}>
+                  {active.progressPercentage || 0}% done
+                </Text>
+              </View>
+              <View style={styles.pathwayBarTrack}>
+                <View
+                  style={[styles.pathwayBarFill, { width: `${active.progressPercentage || 0}%` }]}
+                />
+              </View>
+              <View style={styles.progressChipRow}>
+                {[25, 50, 75, 100].map((pct) => (
+                  <TouchableOpacity
+                    key={pct}
+                    style={[
+                      styles.progressChip,
+                      (active.progressPercentage || 0) >= pct && styles.progressChipActive,
+                    ]}
+                    disabled={busyId === `prog-${active.id}`}
+                    onPress={() => handleProgress(active, pct)}
+                  >
+                    <Text
+                      style={[
+                        styles.progressChipText,
+                        (active.progressPercentage || 0) >= pct && styles.progressChipTextActive,
+                      ]}
+                    >
+                      {pct === 100 ? "Done" : `${pct}%`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* CTAs */}
+            <TouchableOpacity
+              style={styles.resumeModuleBtn}
+              activeOpacity={0.88}
+              onPress={() => openUrl(active.recommendation?.url)}
+            >
+              <Feather name="external-link" size={16} color="#FFFFFF" />
+              <Text style={styles.resumeModuleBtnText}>Continue Learning</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ================= 3. Filter Tabs ================= */}
+        <View style={styles.filterTabsRow}>
+          {[
+            { key: "modules", label: `Resources (${resources.length})` },
+            { key: "projects", label: `Projects (${projects.length})` },
+          ].map((f) => (
+            <TouchableOpacity
+              key={f.key}
+              style={[
+                styles.filterPill,
+                activeFilter === f.key && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter(f.key)}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === f.key && styles.filterPillTextActive,
+                ]}
+              >
+                {f.label}
               </Text>
-              <Text style={styles.certSub}>
-                Endorsed by Sterling Bank, Flutterwave & Moniepoint
-              </Text>
-            </View>
-          </View>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-          {/* Progress Track */}
-          <View style={styles.pathwayBarTrack}>
-            <View style={[styles.pathwayBarFill, { width: "80%" }]} />
-          </View>
+        {/* ================= 4. Recommendations ================= */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Recommended For You</Text>
+          <Feather name="star" size={14} color="#556070" />
+        </View>
 
-          {/* Checklist */}
-          <View style={styles.certChecklist}>
-            <View style={styles.checkItemRow}>
-              <Ionicons name="checkmark-circle" size={15} color="#0D8A58" />
-              <Text style={styles.checkItemLabel}>Pass Diagnostic Test</Text>
-              <Text style={styles.checkItemValueGreen}>PASSED (94%)</Text>
-            </View>
-
-            <View style={styles.checkItemRow}>
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={15}
-                color="#731F94"
-              />
-              <Text style={styles.checkItemLabel}>Complete 2 Capstones</Text>
-              <Text style={styles.checkItemValue}>1 / 2 Finished</Text>
-            </View>
-
-            <View style={styles.checkItemRow}>
-              <MaterialCommunityIcons
-                name="account-group-outline"
-                size={15}
-                color="#7B6F84"
-              />
-              <Text style={styles.checkItemLabel}>Pass Peer Code Review</Text>
-              <Text style={styles.checkItemValueGray}>Pending</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.claimCertBtn}
-            onPress={() =>
-              Alert.alert("Capstone 2", "Navigating to Capstone 2 Workspace...")
+        {visible.length === 0 ? (
+          <EmptyCard
+            icon="book-open"
+            title={recs.length ? "Nothing in this category" : "No recommendations yet"}
+            message={
+              recs.length
+                ? "Switch tabs to see other resources."
+                : "We're curating resources for your skill gaps. Meanwhile, search for courses on the skills below."
             }
-          >
-            <MaterialCommunityIcons
-              name="clipboard-check-outline"
-              size={16}
-              color="#FFFFFF"
-            />
-            <Text style={styles.claimCertBtnText}>
-              Complete Capstone 2 to Claim
+          />
+        ) : (
+          visible.map((rec) => {
+            const record = progressByRec[String(rec.id)];
+            const busy = busyId === `rec-${rec.id}`;
+            return (
+              <View key={rec.id} style={styles.card}>
+                <View style={styles.upcomingBadgeRow}>
+                  <View style={styles.moduleNumberPill}>
+                    <Text style={styles.moduleNumberText}>
+                      {(DIFFICULTY_LABEL[rec.difficulty] || "Resource").toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.unlocksText}>
+                    {record
+                      ? record.status === "completed"
+                        ? "Completed ✓"
+                        : `${record.progressPercentage || 0}% done`
+                      : rec.skill?.name || ""}
+                  </Text>
+                </View>
+
+                <Text style={styles.moduleCardTitle}>{rec.title}</Text>
+                {!!rec.description && (
+                  <Text style={styles.moduleCardDescription}>{rec.description}</Text>
+                )}
+
+                <View style={styles.moduleCardFooter}>
+                  <View style={styles.metaRow}>
+                    <Feather name="clock" size={12} color="#7B6F84" />
+                    <Text style={styles.metaText}>
+                      {rec.estimatedHours ? `${rec.estimatedHours} hrs total` : "Self-paced"}
+                    </Text>
+                  </View>
+                  {record ? (
+                    <TouchableOpacity onPress={() => openUrl(rec.url)}>
+                      <Text style={styles.linkText}>Open →</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.launchPillBtn}
+                      disabled={busy}
+                      onPress={() => handleStart(rec)}
+                    >
+                      {busy ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.launchPillText}>Start</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            );
+          })
+        )}
+
+        {/* ================= 5. Skills to learn (from gap analysis) ================= */}
+        {stats.missingSkills.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Skills To Learn</Text>
+            <Text style={styles.sectionSubtitle}>
+              From your skill-gap analysis. Tap a skill to find free courses.
             </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ================= 6. Cloud Practice Environments ================= */}
-        <View style={styles.practiceHeaderRow}>
-          <Text style={styles.sectionTitle}>Cloud Practice Environments</Text>
-          <View style={styles.liveRuntimePill}>
-            <View style={styles.greenLiveDot} />
-            <Text style={styles.liveRuntimeText}>Live Runtime</Text>
-          </View>
-        </View>
-
-        {/* PostgreSQL Terminal Box */}
-        <View style={styles.darkTerminalCard}>
-          <View style={styles.terminalHeader}>
-            <View style={styles.terminalTitleRow}>
-              <MaterialCommunityIcons
-                name="database"
-                size={16}
-                color="#C488DE"
-              />
-              <Text style={styles.terminalTitleText}>
-                PostgreSQL Transit Sandbox
-              </Text>
+            <View style={styles.card}>
+              {stats.missingSkills.map((skill) => (
+                <TouchableOpacity
+                  key={skill}
+                  style={styles.checkItemRow}
+                  onPress={() => searchSkill(skill)}
+                >
+                  <MaterialCommunityIcons name="school-outline" size={15} color="#731F94" />
+                  <Text style={styles.checkItemLabel}>{titleCase(skill)}</Text>
+                  <Feather name="external-link" size={13} color="#731F94" />
+                </TouchableOpacity>
+              ))}
             </View>
-            <View style={styles.terminalVersionBadge}>
-              <Text style={styles.terminalVersionText}>v16.1</Text>
-            </View>
-          </View>
-
-          <Text style={styles.terminalDesc}>
-            Pre-seeded with 120,000 real Cowry BRT transit logs. Practice
-            partition queries and rolling balances without setup.
-          </Text>
-
-          {/* SQL Code Snippet Box */}
-          <View style={styles.codeSnippetBox}>
-            <Text style={styles.codeText}>
-              <Text style={styles.sqlKeyword}>SELECT</Text> card_id,{" "}
-              <Text style={styles.sqlKeyword}>SUM</Text>(amount){" "}
-              <Text style={styles.sqlKeyword}>OVER</Text>
-              {"\n"}(<Text style={styles.sqlKeyword}>PARTITION BY</Text>{" "}
-              terminal_id) <Text style={styles.sqlKeyword}>FROM</Text>
-              {"\n"}
-              cowry_logs <Text style={styles.sqlKeyword}>LIMIT</Text> 5;
-            </Text>
-          </View>
-
-          <View style={styles.terminalFooterRow}>
-            <Text style={styles.memoryText}>Memory: 512MB / 1024MB</Text>
-            <TouchableOpacity
-              style={styles.launchQueryBtn}
-              onPress={() =>
-                Alert.alert(
-                  "Query Runner",
-                  "Executing PostgreSQL query runner...",
-                )
-              }
-            >
-              <Ionicons name="play" size={14} color="#FFFFFF" />
-              <Text style={styles.launchQueryText}>Launch Query Runner</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* FastAPI Webhooks Mock */}
-        <View style={styles.card}>
-          <View style={styles.fastApiRow}>
-            <View style={styles.fastApiIconBox}>
-              <MaterialCommunityIcons
-                name="webhook"
-                size={22}
-                color="#731F94"
-              />
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.fastApiTitle}>FastAPI Webhooks Mock</Text>
-              <Text style={styles.fastApiSubtitle}>
-                Simulate Paystack charge.success webhooks...
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.launchPillBtn}
-              onPress={() =>
-                Alert.alert(
-                  "Webhook Simulator",
-                  "Starting webhook server listener...",
-                )
-              }
-            >
-              <Text style={styles.launchPillText}>Launch</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ================= 7. National Accreditation Guarantee ================= */}
-        <View style={styles.accreditationCard}>
-          <View style={styles.shieldIconWrap}>
-            <MaterialCommunityIcons
-              name="shield-check"
-              size={20}
-              color="#731F94"
-            />
-          </View>
-
-          <Text style={styles.accreditationTitle}>
-            National Accreditation Guarantee
-          </Text>
-          <Text style={styles.accreditationDesc}>
-            NDPR Compliant & NITDA Accredited. All certificates carry
-            cryptographic signatures recognized by 48+ Nigerian hiring partners.
-          </Text>
-
-          <View style={styles.standardsRow}>
-            <Text style={styles.standardText}>SEC VETTED</Text>
-            <View style={styles.standardDot} />
-            <Text style={styles.standardText}>LSETF PARTNER</Text>
-            <View style={styles.standardDot} />
-            <Text style={styles.standardText}>ISO/IEC 27001</Text>
-          </View>
-        </View>
+          </>
+        )}
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  progressChipRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  progressChip: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E4D4EE",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  progressChipActive: {
+    backgroundColor: "#731F94",
+    borderColor: "#731F94",
+  },
+  progressChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#731F94",
+  },
+  progressChipTextActive: {
+    color: "#FFFFFF",
+  },
+  linkText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#731F94",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

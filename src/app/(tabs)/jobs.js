@@ -1,10 +1,14 @@
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
-  Image,
+  Linking,
+  RefreshControl,
   ScrollView,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -15,21 +19,154 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import LogoSvg from "../../../assets/images/logo.svg";
+import { EmptyCard, LoadingState } from "../../components/StateViews";
+import { getErrorMessage } from "../../services/api";
+import { asList, matchingService, opportunityService } from "../../services/endpoints";
+import { initials, invalidateSkillBridge, titleCase, useSkillBridge } from "../../services/useSkillBridge";
 
-const CAFE_ONE_IMAGE = require("../../../assets/images/TundeAlabi.png");
+const BOOKMARKS_KEY = "skillbridge_bookmarks";
+const TYPE_LABEL = {
+  internship: "Internship",
+  job: "Full-time",
+  graduate_program: "Graduate Program",
+  fellowship: "Fellowship",
+  freelance: "Freelance",
+};
+const FILTERS = [
+  { key: "All", icon: null, label: "All Roles" },
+  { key: "Grad", icon: "school-outline", label: "Internship / Fresh Grad" },
+  { key: "Remote", icon: "home", label: "Hybrid / Remote" },
+];
+
+const formatDate = (d) => {
+  if (!d) return "Open";
+  const date = new Date(d);
+  return isNaN(date) ? "Open" : date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
 
 export default function JobsScreen() {
   const router = useRouter();
+  const { data, stats, loading, refreshing, refresh, reload } = useSkillBridge();
   const [activeFilter, setActiveFilter] = useState("All");
-  const [bookmarked, setBookmarked] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [bookmarks, setBookmarks] = useState({});
 
-  // 89% Match Circular Gauge
+  useEffect(() => {
+    AsyncStorage.getItem(BOOKMARKS_KEY)
+      .then((raw) => raw && setBookmarks(JSON.parse(raw)))
+      .catch(() => {});
+  }, []);
+
+  const runSearch = useCallback(async (q) => {
+    setSearching(true);
+    try {
+      const res = await opportunityService.list({
+        q: q || undefined,
+        status: "active",
+        limit: 30,
+      });
+      setSearchResults(asList(res));
+    } catch (err) {
+      if (err?.response?.status !== 401) setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  // Initial browse list (for users who don't have matches yet)
+  useEffect(() => {
+    runSearch("");
+  }, [runSearch]);
+
+  // Merge matches (with %) and plain opportunities into one list of rows.
+  const rows = useMemo(() => {
+    const matchByOpp = {};
+    (data?.matches || []).forEach((m) => {
+      if (m.opportunity) matchByOpp[m.opportunity.id || m.opportunityId] = m;
+    });
+    const seen = new Set();
+    const out = [];
+    const push = (opp, match) => {
+      if (!opp || seen.has(opp.id)) return;
+      seen.add(opp.id);
+      out.push({ opp, match: match || matchByOpp[opp.id] || null });
+    };
+    if (!query.trim()) (data?.matches || []).forEach((m) => push(m.opportunity, m));
+    searchResults.forEach((o) => push(o));
+
+    return out.filter(({ opp }) => {
+      if (activeFilter === "Grad") return ["internship", "graduate_program", "fellowship"].includes(opp.type);
+      if (activeFilter === "Remote") return ["remote", "hybrid"].includes(opp.workMode);
+      return true;
+    });
+  }, [data?.matches, searchResults, activeFilter, query]);
+
+  const featured = rows.find((r) => r.opp.id === selectedId) || rows[0] || null;
+  const others = rows.filter((r) => r !== featured);
+
+  const toggleBookmark = async (id) => {
+    const next = { ...bookmarks, [id]: !bookmarks[id] };
+    if (!next[id]) delete next[id];
+    setBookmarks(next);
+    try {
+      await AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next));
+    } catch (e) {}
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      await matchingService.generate();
+      invalidateSkillBridge();
+      await reload();
+    } catch (err) {
+      Alert.alert(
+        "Couldn't generate matches",
+        err?.response?.status === 400
+          ? "You need a completed skill-gap analysis first. Upload your CV from profile setup."
+          : getErrorMessage(err),
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const apply = (opp) => {
+    if (!opp?.applicationUrl) {
+      Alert.alert("Apply", "This opportunity doesn't have an application link yet.");
+      return;
+    }
+    Linking.openURL(opp.applicationUrl).catch(() =>
+      Alert.alert("Couldn't open link", opp.applicationUrl),
+    );
+  };
+
+  const share = (opp) =>
+    Share.share({
+      message: `${opp.title} at ${opp.company}${opp.applicationUrl ? `\n${opp.applicationUrl}` : ""}`,
+    }).catch(() => {});
+
+  // Gauge
   const circleSize = 60;
   const strokeWidth = 5;
   const radius = (circleSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const matchRatio = 0.89;
-  const strokeDashoffset = circumference - circumference * matchRatio;
+  const featuredPct = featured?.match?.matchPercentage;
+  const strokeDashoffset =
+    circumference - circumference * ((typeof featuredPct === "number" ? featuredPct : 0) / 100);
+
+  const userSkillSet = new Set(stats.currentSkills.map((s) => s.toLowerCase()));
+  const featuredMatched =
+    featured?.match?.matchedSkills ||
+    (featured?.opp?.requiredSkills || []).filter((s) => userSkillSet.has(String(s).toLowerCase()));
+  const featuredMissing =
+    featured?.match?.missingSkills ||
+    (featured?.opp?.requiredSkills || []).filter((s) => !userSkillSet.has(String(s).toLowerCase()));
+  const requiredCount = (featured?.opp?.requiredSkills || []).length;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -59,9 +196,23 @@ export default function JobsScreen() {
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Finding roles for you..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              refresh();
+              runSearch(query);
+            }}
+            tintColor="#731F94"
+          />
+        }
       >
         {/* ================= Search Bar ================= */}
         <View style={styles.searchBarContainer}>
@@ -73,16 +224,24 @@ export default function JobsScreen() {
           />
           <TextInput
             style={styles.searchInput}
-            placeholder="Fintech & Banking"
+            placeholder={stats.targetRole ? `Search e.g. ${stats.targetRole}` : "Search roles, companies, skills"}
             placeholderTextColor="#7B6F84"
+            value={query}
+            onChangeText={setQuery}
+            returnKeyType="search"
+            onSubmitEditing={() => runSearch(query.trim())}
           />
-          <TouchableOpacity hitSlop={8}>
-            <MaterialCommunityIcons
-              name="tune-variant"
-              size={20}
-              color="#731F94"
-            />
-          </TouchableOpacity>
+          {searching ? (
+            <ActivityIndicator size="small" color="#731F94" />
+          ) : (
+            <TouchableOpacity hitSlop={8} onPress={() => runSearch(query.trim())}>
+              <MaterialCommunityIcons
+                name="tune-variant"
+                size={20}
+                color="#731F94"
+              />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ================= Filter Chips ================= */}
@@ -91,102 +250,92 @@ export default function JobsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterChipsRow}
         >
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              activeFilter === "All"
-                ? styles.filterChipActive
-                : styles.filterChipInactive,
-            ]}
-            onPress={() => setActiveFilter("All")}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter === "All"
-                  ? styles.filterTextActive
-                  : styles.filterTextInactive,
-              ]}
-            >
-              All Roles (42)
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              activeFilter === "NYSC"
-                ? styles.filterChipActive
-                : styles.filterChipInactive,
-            ]}
-            onPress={() => setActiveFilter("NYSC")}
-          >
-            <Ionicons
-              name="school-outline"
-              size={14}
-              color={activeFilter === "NYSC" ? "#FFFFFF" : "#731F94"}
-              style={{ marginRight: 4 }}
-            />
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter === "NYSC"
-                  ? styles.filterTextActive
-                  : styles.filterTextInactive,
-              ]}
-            >
-              NYSC / Fresh Grad
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              activeFilter === "Hybrid"
-                ? styles.filterChipActive
-                : styles.filterChipInactive,
-            ]}
-            onPress={() => setActiveFilter("Hybrid")}
-          >
-            <Feather
-              name="home"
-              size={13}
-              color={activeFilter === "Hybrid" ? "#FFFFFF" : "#731F94"}
-              style={{ marginRight: 4 }}
-            />
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter === "Hybrid"
-                  ? styles.filterTextActive
-                  : styles.filterTextInactive,
-              ]}
-            >
-              Hybrid / Remote
-            </Text>
-          </TouchableOpacity>
+          {FILTERS.map((f) => {
+            const active = activeFilter === f.key;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[
+                  styles.filterChip,
+                  active ? styles.filterChipActive : styles.filterChipInactive,
+                ]}
+                onPress={() => setActiveFilter(f.key)}
+              >
+                {f.icon === "school-outline" && (
+                  <Ionicons
+                    name="school-outline"
+                    size={14}
+                    color={active ? "#FFFFFF" : "#731F94"}
+                    style={{ marginRight: 4 }}
+                  />
+                )}
+                {f.icon === "home" && (
+                  <Feather
+                    name="home"
+                    size={13}
+                    color={active ? "#FFFFFF" : "#731F94"}
+                    style={{ marginRight: 4 }}
+                  />
+                )}
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    active ? styles.filterTextActive : styles.filterTextInactive,
+                  ]}
+                >
+                  {f.key === "All" ? `${f.label} (${rows.length})` : f.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
-        {/* ================= Featured Main Job Card ================= */}
+        {(data?.matches || []).length === 0 && (
+          <TouchableOpacity
+            style={styles.generateBanner}
+            onPress={handleGenerate}
+            disabled={generating}
+            activeOpacity={0.85}
+          >
+            {generating ? (
+              <ActivityIndicator size="small" color="#731F94" />
+            ) : (
+              <MaterialCommunityIcons name="creation" size={16} color="#731F94" />
+            )}
+            <Text style={styles.generateBannerText}>
+              {generating ? "Calculating your match scores..." : "Get personalised match scores for these roles"}
+            </Text>
+            <Feather name="chevron-right" size={16} color="#731F94" />
+          </TouchableOpacity>
+        )}
+
+        {!featured ? (
+          <EmptyCard
+            icon="briefcase"
+            title={searching ? "Searching..." : "No roles found"}
+            message={
+              query
+                ? "Try a different search term or filter."
+                : "New opportunities are added regularly. Pull down to refresh."
+            }
+          />
+        ) : (
+        /* ================= Featured Main Job Card ================= */
         <View style={styles.featuredJobCard}>
           {/* Top Title Section */}
           <View style={styles.featuredHeaderRow}>
-            <Image
-              source={CAFE_ONE_IMAGE}
-              style={styles.featuredCompanyLogo}
-              resizeMode="cover"
-            />
+            <View style={[styles.featuredCompanyLogo, styles.logoInitialsBox]}>
+              <Text style={styles.logoInitialsText}>{initials(featured.opp.company)}</Text>
+            </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <View style={styles.fastTrackBadgeRow}>
-                <Text style={styles.fastTrackText}>FAST–TRACK VERIFIED</Text>
-                <Ionicons name="checkmark-circle" size={13} color="#731F94" />
+                <Text style={styles.fastTrackText}>
+                  {featured.match ? "TOP MATCH FOR YOU" : (TYPE_LABEL[featured.opp.type] || "OPPORTUNITY").toUpperCase()}
+                </Text>
+                {featured.match && <Ionicons name="checkmark-circle" size={13} color="#731F94" />}
               </View>
-              <Text style={styles.featuredJobTitle}>
-                Graduate Trainee Business & Data Analyst
-              </Text>
-              <Text style={styles.featuredCompanyText}>
-                Sterling Bank × Café One
-              </Text>
+              <Text style={styles.featuredJobTitle}>{featured.opp.title}</Text>
+              <Text style={styles.featuredCompanyText}>{featured.opp.company}</Text>
             </View>
           </View>
 
@@ -194,21 +343,19 @@ export default function JobsScreen() {
           <View style={styles.jobSpecGrid}>
             <View style={styles.jobSpecItem}>
               <Ionicons name="location-outline" size={16} color="#731F94" />
-              <View style={{ marginLeft: 6 }}>
+              <View style={{ marginLeft: 6, flex: 1 }}>
                 <Text style={styles.specLabel}>Location</Text>
-                <Text style={styles.specValue}>Victoria Island</Text>
+                <Text style={styles.specValue} numberOfLines={1}>
+                  {featured.opp.location || "Not specified"}
+                </Text>
               </View>
             </View>
 
             <View style={styles.jobSpecItem}>
-              <MaterialCommunityIcons
-                name="cash-multiple"
-                size={16}
-                color="#731F94"
-              />
+              <Feather name="home" size={15} color="#731F94" />
               <View style={{ marginLeft: 6 }}>
-                <Text style={styles.specLabel}>Monthly Stipend</Text>
-                <Text style={styles.specValue}>₦220k – ₦300k</Text>
+                <Text style={styles.specLabel}>Work Mode</Text>
+                <Text style={styles.specValue}>{titleCase(featured.opp.workMode || "onsite")}</Text>
               </View>
             </View>
 
@@ -219,16 +366,16 @@ export default function JobsScreen() {
                 color="#731F94"
               />
               <View style={{ marginLeft: 6 }}>
-                <Text style={styles.specLabel}>Cohort Intake</Text>
-                <Text style={styles.specValue}>NYSC Accepted</Text>
+                <Text style={styles.specLabel}>Type</Text>
+                <Text style={styles.specValue}>{TYPE_LABEL[featured.opp.type] || "Role"}</Text>
               </View>
             </View>
 
             <View style={styles.jobSpecItem}>
-              <Ionicons name="flash-outline" size={16} color="#731F94" />
+              <Ionicons name="calendar-outline" size={16} color="#731F94" />
               <View style={{ marginLeft: 6 }}>
-                <Text style={styles.specLabel}>Hiring Speed</Text>
-                <Text style={styles.specValue}>Offers in 6 days</Text>
+                <Text style={styles.specLabel}>Deadline</Text>
+                <Text style={styles.specValue}>{formatDate(featured.opp.deadline)}</Text>
               </View>
             </View>
           </View>
@@ -241,11 +388,19 @@ export default function JobsScreen() {
                 <Text style={styles.engineTitle}>SkillBridge Match Engine</Text>
               </View>
               <View style={styles.calibrationPill}>
-                <Text style={styles.calibrationPillText}>High Calibration</Text>
+                <Text style={styles.calibrationPillText}>
+                  {typeof featuredPct !== "number"
+                    ? "Not scored"
+                    : featuredPct >= 75
+                      ? "Strong Fit"
+                      : featuredPct >= 50
+                        ? "Good Fit"
+                        : "Stretch Role"}
+                </Text>
               </View>
             </View>
 
-            {/* Match Gauge & Pass Box */}
+            {/* Match Gauge */}
             <View style={styles.gaugePassCard}>
               <View style={styles.gaugeWrap}>
                 <Svg width={circleSize} height={circleSize}>
@@ -271,7 +426,9 @@ export default function JobsScreen() {
                   />
                 </Svg>
                 <View style={styles.gaugeCenterLabel}>
-                  <Text style={styles.gaugePercent}>89%</Text>
+                  <Text style={styles.gaugePercent}>
+                    {typeof featuredPct === "number" ? `${featuredPct}%` : "—"}
+                  </Text>
                   <Text style={styles.gaugeMatchLabel}>Match</Text>
                 </View>
               </View>
@@ -280,126 +437,104 @@ export default function JobsScreen() {
                 <View style={styles.passTitleRow}>
                   <Feather name="zap" size={12} color="#731F94" />
                   <Text style={styles.passTitleText}>
-                    STAGE 1 FAST–TRACK PASS
+                    {featuredMatched.length}/{requiredCount || featuredMatched.length} REQUIRED SKILLS
                   </Text>
                 </View>
-                <Text style={styles.passDescText}>
-                  Your profile automatically bypasses general HR screen directly
-                  to the Group Data Lead review.
+                <Text style={styles.passDescText} numberOfLines={4}>
+                  {featured.opp.description}
                 </Text>
               </View>
             </View>
 
             {/* Plain Terms Explanation */}
-            <View style={styles.plainTermsBox}>
-              <View style={styles.plainTermsHeader}>
-                <MaterialCommunityIcons
-                  name="lightbulb-on-outline"
-                  size={16}
-                  color="#731F94"
-                />
-                <Text style={styles.plainTermsTitle}>
-                  Why you match in plain terms
-                </Text>
+            {!!featured.match?.explanation && (
+              <View style={styles.plainTermsBox}>
+                <View style={styles.plainTermsHeader}>
+                  <MaterialCommunityIcons
+                    name="lightbulb-on-outline"
+                    size={16}
+                    color="#731F94"
+                  />
+                  <Text style={styles.plainTermsTitle}>
+                    Why you match in plain terms
+                  </Text>
+                </View>
+                <Text style={styles.plainTermsBody}>{featured.match.explanation}</Text>
               </View>
-              <Text style={styles.plainTermsBody}>
-                Your{" "}
-                <Text style={styles.boldText}>
-                  UNILAG Econometrics coursework
-                </Text>{" "}
-                provides the exact quantitative foundation assessed by Sterling
-                Bank. Your verified{" "}
-                <Text style={styles.boldText}>SQL Window Functions</Text> score
-                puts you in the top 10% of applicants.
-              </Text>
-            </View>
+            )}
 
             {/* Strong Skills Alignment */}
-            <View style={styles.alignmentHeaderRow}>
-              <Text style={styles.alignmentHeading}>
-                STRONG SKILL ALIGNMENT (4/4 CORE)
-              </Text>
-              <Text style={styles.alignmentSub}>Verified via Assessments</Text>
-            </View>
-
-            <View style={styles.skillPillsWrap}>
-              {[
-                "PostgreSQL queries",
-                "Financial Modeling",
-                "Cohort Analysis",
-                "Advanced Excel",
-              ].map((skill) => (
-                <View key={skill} style={styles.verifiedSkillPill}>
-                  <Ionicons name="checkmark-circle" size={13} color="#731F94" />
-                  <Text style={styles.verifiedSkillText}>{skill}</Text>
+            {featuredMatched.length > 0 && (
+              <>
+                <View style={styles.alignmentHeaderRow}>
+                  <Text style={styles.alignmentHeading}>
+                    SKILL ALIGNMENT ({featuredMatched.length})
+                  </Text>
+                  <Text style={styles.alignmentSub}>From your profile</Text>
                 </View>
-              ))}
-            </View>
+
+                <View style={styles.skillPillsWrap}>
+                  {featuredMatched.map((skill) => (
+                    <View key={skill} style={styles.verifiedSkillPill}>
+                      <Ionicons name="checkmark-circle" size={13} color="#731F94" />
+                      <Text style={styles.verifiedSkillText}>{titleCase(skill)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
 
             {/* Growth Gaps to Close */}
-            <View style={[styles.alignmentHeaderRow, { marginTop: 14 }]}>
-              <Text style={styles.alignmentHeading}>GROWTH GAPS TO CLOSE</Text>
-              <Text style={styles.bridgeableSub}>Bridgeable in 1–2 weeks</Text>
-            </View>
+            {featuredMissing.length > 0 && (
+              <>
+                <View style={[styles.alignmentHeaderRow, { marginTop: 14 }]}>
+                  <Text style={styles.alignmentHeading}>GROWTH GAPS TO CLOSE</Text>
+                  <TouchableOpacity onPress={() => router.push("/(tabs)/learn")}>
+                    <Text style={styles.bridgeableSub}>Find courses →</Text>
+                  </TouchableOpacity>
+                </View>
 
-            <View style={styles.gapCard}>
-              <Feather
-                name="info"
-                size={14}
-                color="#D97706"
-                style={{ marginTop: 2 }}
-              />
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.gapCardTitle}>AWS Redshift ingestion</Text>
-                <Text style={styles.gapCardDesc}>
-                  Minor gap — team confirmed this can be acquired during first
-                  30 days onboarding.
-                </Text>
-              </View>
-            </View>
+                {featuredMissing.slice(0, 4).map((skill) => (
+                  <View key={skill} style={styles.gapCard}>
+                    <Feather
+                      name="info"
+                      size={14}
+                      color="#D97706"
+                      style={{ marginTop: 2 }}
+                    />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={styles.gapCardTitle}>{titleCase(skill)}</Text>
+                      <Text style={styles.gapCardDesc}>
+                        Required for this role — add it to your roadmap to raise your match.
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
 
-            <View style={styles.gapCard}>
-              <Feather
-                name="info"
-                size={14}
-                color="#D97706"
-                style={{ marginTop: 2 }}
-              />
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.gapCardTitle}>dbt pipeline basics</Text>
-                <Text style={styles.gapCardDesc}>
-                  Recommended 4hr micro-lab on your SkillBridge Roadmap to
-                  achieve 96% match.
-                </Text>
+            {/* Preferred skills */}
+            {(featured.opp.preferredSkills || []).length > 0 && (
+              <View style={styles.perksRow}>
+                {featured.opp.preferredSkills.slice(0, 3).map((s) => (
+                  <View key={s} style={styles.perkItem}>
+                    <Feather name="plus-circle" size={12} color="#556070" />
+                    <Text style={styles.perkText}>Nice to have: {titleCase(s)}</Text>
+                  </View>
+                ))}
               </View>
-            </View>
-
-            {/* Perks Row */}
-            <View style={styles.perksRow}>
-              <View style={styles.perkItem}>
-                <Ionicons name="cafe-outline" size={13} color="#556070" />
-                <Text style={styles.perkText}>Free Café One Workspace</Text>
-              </View>
-              <View style={styles.perkItem}>
-                <Feather name="shield" size={12} color="#556070" />
-                <Text style={styles.perkText}>HMO + Transit Pass</Text>
-              </View>
-              <View style={styles.perkItem}>
-                <Feather name="clock" size={12} color="#556070" />
-                <Text style={styles.perkText}>2 Days Remote / WFH</Text>
-              </View>
-            </View>
+            )}
           </View>
 
           {/* Action Row */}
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={styles.iconActionBtn}
-              onPress={() => setBookmarked(!bookmarked)}
+              onPress={() => toggleBookmark(featured.opp.id)}
               hitSlop={8}
             >
               <Ionicons
-                name={bookmarked ? "bookmark" : "bookmark-outline"}
+                name={bookmarks[featured.opp.id] ? "bookmark" : "bookmark-outline"}
                 size={18}
                 color="#731F94"
               />
@@ -407,7 +542,7 @@ export default function JobsScreen() {
 
             <TouchableOpacity
               style={styles.iconActionBtn}
-              onPress={() => Alert.alert("Share Role", "Sharing role link...")}
+              onPress={() => share(featured.opp)}
               hitSlop={8}
             >
               <Feather name="share-2" size={18} color="#731F94" />
@@ -416,137 +551,114 @@ export default function JobsScreen() {
             <TouchableOpacity
               style={styles.applyBtn}
               activeOpacity={0.88}
-              onPress={() =>
-                Alert.alert(
-                  "Apply",
-                  "Redirecting to direct candidate fast-pass pipeline...",
-                )
-              }
+              onPress={() => apply(featured.opp)}
             >
-              <Feather name="lock" size={15} color="#FFFFFF" />
+              <Feather name="external-link" size={15} color="#FFFFFF" />
               <Text style={styles.applyBtnText}>Apply</Text>
             </TouchableOpacity>
           </View>
         </View>
+        )}
 
-        {/* ================= More Roles Calibrated for You ================= */}
-        <View style={styles.moreRolesHeaderRow}>
-          <View>
-            <Text style={styles.moreRolesTitle}>
-              More Roles Calibrated for You
-            </Text>
-            <Text style={styles.moreRolesSubtitle}>
-              Based on your validated Lagos university records
-            </Text>
+        {/* ================= More Roles ================= */}
+        {others.length > 0 && (
+          <View style={styles.moreRolesHeaderRow}>
+            <View>
+              <Text style={styles.moreRolesTitle}>
+                {data?.matches?.length ? "More Roles Calibrated for You" : "More Open Roles"}
+              </Text>
+              <Text style={styles.moreRolesSubtitle}>
+                {stats.targetRole ? `Related to ${stats.targetRole}` : "Tap a role to see details"}
+              </Text>
+            </View>
+            {(data?.matches || []).length > 0 && (
+              <TouchableOpacity onPress={handleGenerate} disabled={generating}>
+                <Text style={styles.viewAllText}>{generating ? "Updating..." : "Re-match"}</Text>
+              </TouchableOpacity>
+            )}
           </View>
+        )}
+
+        {others.map(({ opp, match }) => (
           <TouchableOpacity
-            onPress={() =>
-              Alert.alert("All Roles", "Fetching full matched catalog...")
-            }
+            key={opp.id}
+            style={styles.calibratedRoleCard}
+            activeOpacity={0.85}
+            onPress={() => setSelectedId(opp.id)}
           >
-            <Text style={styles.viewAllText}>View All</Text>
+            <View style={styles.roleCardTopRow}>
+              <View style={styles.roleLogoBox}>
+                <Text style={styles.logoInitialsText}>{initials(opp.company)}</Text>
+              </View>
+
+              <View style={styles.roleInfoCol}>
+                <Text style={styles.roleName}>{opp.title}</Text>
+                <Text style={styles.roleCompany}>
+                  {opp.company}
+                  {opp.location ? ` • ${opp.location}` : ""}
+                </Text>
+              </View>
+
+              {typeof match?.matchPercentage === "number" && (
+                <View style={styles.matchPillBadge}>
+                  <MaterialCommunityIcons name="creation" size={12} color="#731F94" />
+                  <Text style={styles.matchPillText}>{match.matchPercentage}% Match</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.roleMetaRow}>
+              <Text style={styles.roleSalary}>{TYPE_LABEL[opp.type] || "Role"}</Text>
+              <Text style={styles.roleMetaTag}>
+                {titleCase(opp.workMode || "onsite")}
+                {opp.deadline ? ` • Closes ${formatDate(opp.deadline)}` : ""}
+              </Text>
+            </View>
+
+            {(opp.requiredSkills || []).length > 0 && (
+              <View style={styles.roleChipsRow}>
+                {opp.requiredSkills.slice(0, 3).map((s) => (
+                  <View key={s} style={styles.roleChip}>
+                    <Text style={styles.roleChipText}>{titleCase(s)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </TouchableOpacity>
-        </View>
-
-        {/* Role 1: Moniepoint */}
-        <View style={styles.calibratedRoleCard}>
-          <View style={styles.roleCardTopRow}>
-            <View style={styles.roleLogoBox}>
-              <MaterialCommunityIcons
-                name="alpha-m-box"
-                size={28}
-                color="#0052FF"
-              />
-            </View>
-
-            <View style={styles.roleInfoCol}>
-              <Text style={styles.roleName}>Junior Data Analyst</Text>
-              <Text style={styles.roleCompany}>
-                Moniepoint Microfinance Bank • Lekki Phase 1
-              </Text>
-            </View>
-
-            <View style={styles.matchPillBadge}>
-              <MaterialCommunityIcons
-                name="creation"
-                size={12}
-                color="#731F94"
-              />
-              <Text style={styles.matchPillText}>81% Match</Text>
-            </View>
-          </View>
-
-          <View style={styles.roleMetaRow}>
-            <Text style={styles.roleSalary}>₦250k – ₦320k/mo</Text>
-            <Text style={styles.roleMetaTag}>Hybrid • NYSC Eligible</Text>
-          </View>
-
-          <View style={styles.roleChipsRow}>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>Fintech Metrics</Text>
-            </View>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>PowerBI</Text>
-            </View>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>SQL Joins</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Role 2: PiggyVest */}
-        <View style={styles.calibratedRoleCard}>
-          <View style={styles.roleCardTopRow}>
-            <View style={styles.roleLogoBox}>
-              <MaterialCommunityIcons
-                name="piggy-bank"
-                size={26}
-                color="#0D8A58"
-              />
-            </View>
-
-            <View style={styles.roleInfoCol}>
-              <Text style={styles.roleName}>Growth Analytics Associate</Text>
-              <Text style={styles.roleCompany}>
-                PiggyVest • Ikeja GRA, Lagos
-              </Text>
-            </View>
-
-            <View style={styles.matchPillBadge}>
-              <MaterialCommunityIcons
-                name="creation"
-                size={12}
-                color="#731F94"
-              />
-              <Text style={styles.matchPillText}>87% Match</Text>
-            </View>
-          </View>
-
-          <View style={styles.roleMetaRow}>
-            <Text style={styles.roleSalary}>₦280k – ₦350k/mo</Text>
-            <Text style={styles.roleMetaTag}>
-              Full-time Grad • Remote 3x/wk
-            </Text>
-          </View>
-
-          <View style={styles.roleChipsRow}>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>Funnel Attribution</Text>
-            </View>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>Python / Pandas</Text>
-            </View>
-            <View style={styles.roleChip}>
-              <Text style={styles.roleChipText}>Mixpanel</Text>
-            </View>
-          </View>
-        </View>
+        ))}
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  logoInitialsBox: {
+    backgroundColor: "#EAE0F5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoInitialsText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#731F94",
+  },
+  generateBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#F5EEFC",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  generateBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#731F94",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

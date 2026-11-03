@@ -1,11 +1,13 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  StatusBar,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,89 +16,147 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 import LogoSvg from "../../assets/images/logo.svg";
+import { authService } from "../services/endpoints";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+
   const [email, setEmail] = useState("");
-  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const handleSendCode = () => {
-    if (!email.trim()) return;
-    // Logic to route to the OTP verification screen
-    router.push({
-      pathname: "/verify-otp",
-      params: { email },
-    });
+  const [emailError, setEmailError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const isFormValid = email.trim() !== "" && !emailError && !loading;
+
+  const validateEmail = (text) => {
+    setEmail(text);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (text.length > 0 && !emailRegex.test(text)) {
+      setEmailError("Enter a valid email address");
+    } else {
+      setEmailError("");
+    }
+  };
+
+  const handleSendCode = async () => {
+    if (!email || emailError) {
+      setEmailError("Enter a valid email address");
+      return;
+    }
+
+    setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+
+    try {
+      await authService.forgotPassword({ email: cleanEmail });
+
+      // Navigate to OTP verification screen with reset flow param
+      router.push({
+        pathname: "/verify-otp",
+        params: {
+          email: cleanEmail,
+          flow: "reset",
+        },
+      });
+    } catch (error) {
+      const serverMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.response?.data?.error ||
+        "Could not send reset code. Please verify your email and try again.";
+
+      Alert.alert("Request Failed", serverMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <SafeAreaView style={styles.safeArea}>
-        <StatusBar barStyle="dark-content" />
-
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.container}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.keyboardContainer}
         >
-          {/* Header Bar */}
-          <View style={styles.headerBar}>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              hitSlop={12}
-              style={styles.backButton}
-            >
-              <Ionicons name="chevron-back" size={28} color="#7A1380" />
-            </TouchableOpacity>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                hitSlop={12}
+                style={styles.backButton}
+              >
+                <Ionicons name="chevron-back" size={28} color="#7A1380" />
+              </TouchableOpacity>
 
-            <View style={styles.logoWrapper}>
-              <LogoSvg width={30} height={30} fill="#7A1380" />
+              <View style={styles.logoWrapper}>
+                <LogoSvg width={30} height={30} />
+              </View>
+
+              <View style={styles.headerRightPlaceholder} />
             </View>
 
-            <View style={styles.headerRightPlaceholder} />
-          </View>
-
-          {/* Heading Content */}
-          <View style={styles.content}>
-            <Text style={styles.title}>Reset Password</Text>
+            {/* Title & Description */}
+            <Text style={styles.title}>Forgot Password?</Text>
             <Text style={styles.subtitle}>
-              Enter your registered email to receive a 6-digit verification code
+              Don't worry! Enter your registered email address and we'll send
+              you a 6-digit recovery code.
             </Text>
 
-            {/* Email Field */}
+            {/* Email Address */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address</Text>
               <TextInput
-                style={styles.input}
-                placeholder="e.g. name@example.com"
-                placeholderTextColor="#A894A6"
+                style={[
+                  styles.input,
+                  emailError ? styles.inputErrorBorder : null,
+                ]}
+                placeholder="Enter your registered email"
+                placeholderTextColor="#A396A1"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={validateEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                editable={!loading}
               />
+              {emailError ? (
+                <View style={styles.errorRow}>
+                  <MaterialIcons name="warning" size={16} color="#E53935" />
+                  <Text style={styles.errorText}>{emailError}</Text>
+                </View>
+              ) : null}
             </View>
 
-            {/* Submit CTA */}
+            {/* Send Code CTA */}
             <TouchableOpacity
               onPress={handleSendCode}
-              disabled={!isEmailValid}
-              activeOpacity={isEmailValid ? 0.85 : 1}
+              activeOpacity={0.85}
+              disabled={!isFormValid}
               style={[
-                styles.button,
-                isEmailValid ? styles.buttonActive : styles.buttonDisabled,
+                styles.primaryButton,
+                !isFormValid && styles.disabledButton,
               ]}
             >
-              <Text
-                style={[
-                  styles.buttonText,
-                  !isEmailValid && styles.buttonTextDisabled,
-                ]}
-              >
-                Send Verification Code
-              </Text>
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Send Reset Code</Text>
+              )}
             </TouchableOpacity>
-          </View>
+
+            {/* Back to Login */}
+            <View style={styles.backToLoginRow}>
+              <Text style={styles.backText}>Remember your password? </Text>
+              <TouchableOpacity onPress={() => router.push("/login")}>
+                <Text style={styles.loginLink}>Log In</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </TouchableWithoutFeedback>
@@ -106,13 +166,16 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#FCECEB", // consistent brand light/pink background
+    backgroundColor: "#FFFFFF",
   },
-  container: {
+  keyboardContainer: {
     flex: 1,
-    paddingHorizontal: 20,
   },
-  headerBar: {
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+  },
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -122,16 +185,6 @@ const styles = StyleSheet.create({
   backButton: {
     width: 40,
     justifyContent: "center",
-    alignItems: "flex-start",
-  },
-  buttonActive: {
-    backgroundColor: "#7A1380",
-  },
-  buttonDisabled: {
-    backgroundColor: "#D1C2CE",
-  },
-  buttonTextDisabled: {
-    color: "#8A7B87",
   },
   logoWrapper: {
     alignItems: "center",
@@ -140,51 +193,81 @@ const styles = StyleSheet.create({
   headerRightPlaceholder: {
     width: 40,
   },
-  content: {
-    marginTop: 24,
-  },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "800",
     color: "#1C101B",
-    letterSpacing: -0.4,
+    marginTop: 28,
     marginBottom: 8,
+    letterSpacing: -0.4,
   },
   subtitle: {
     fontSize: 14,
-    color: "#4B3F4B",
+    color: "#5B4E5A",
     lineHeight: 20,
-    marginBottom: 24,
+    marginBottom: 32,
   },
   inputGroup: {
-    marginBottom: 28,
+    marginBottom: 24,
   },
   label: {
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "600",
     color: "#1C101B",
     marginBottom: 8,
   },
   input: {
-    height: 50,
-    borderRadius: 12,
+    height: 52,
     borderWidth: 1.2,
     borderColor: "#7A1380",
-    backgroundColor: "#FCECEB",
+    borderRadius: 14,
     paddingHorizontal: 16,
     fontSize: 15,
     color: "#1C101B",
+    backgroundColor: "#FFFFFF",
   },
-  button: {
+  inputErrorBorder: {
+    borderColor: "#E53935",
+  },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#E53935",
+    fontWeight: "500",
+  },
+  primaryButton: {
     height: 52,
-    borderRadius: 26,
     backgroundColor: "#7A1380",
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
   },
-  buttonText: {
-    fontSize: 15,
-    fontWeight: "700",
+  disabledButton: {
+    backgroundColor: "#D1C7D2",
+  },
+  primaryButtonText: {
     color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  backToLoginRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 28,
+  },
+  backText: {
+    fontSize: 14,
+    color: "#1C101B",
+  },
+  loginLink: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#7A1380",
   },
 });

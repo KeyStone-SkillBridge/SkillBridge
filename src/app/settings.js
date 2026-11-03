@@ -16,6 +16,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { getErrorMessage } from "../services/api";
+import { userService } from "../services/endpoints";
+import { clearSession } from "../services/session";
+import { invalidateSkillBridge } from "../services/useSkillBridge";
+
 export default function SettingsScreen() {
   const router = useRouter();
 
@@ -31,18 +36,30 @@ export default function SettingsScreen() {
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
   const [recruiterNetwork, setRecruiterNetwork] = useState(true);
 
+  const [deleting, setDeleting] = useState(false);
+
   const confirmDeleteAccount = async () => {
-    if (!deletePassword.trim()) {
-      Alert.alert(
-        "Required",
-        "Please enter your password to confirm account deletion.",
-      );
+    if (deletePassword.trim().toUpperCase() !== "DELETE") {
+      Alert.alert("Confirm deletion", 'Type DELETE to permanently delete your account.');
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await userService.deleteMe();
+    } catch (err) {
+      setDeleting(false);
+      if (err?.response?.status === 401) return;
+      Alert.alert("Couldn't delete account", getErrorMessage(err));
       return;
     }
 
     setDeleteModalVisible(false);
     setDeletePassword("");
-    // Clear local storage and reset to onboarding
+    setDeleting(false);
+    // Clear the session + all local data and reset to onboarding
+    await clearSession();
+    invalidateSkillBridge();
     await AsyncStorage.clear();
     router.replace("/onboarding");
   };
@@ -84,7 +101,7 @@ export default function SettingsScreen() {
           >
             <View style={styles.rowTextContainer}>
               <Text style={styles.rowTitle}>Password reset</Text>
-              <Text style={styles.rowSubtitle}>Last changed 2 months ago</Text>
+              <Text style={styles.rowSubtitle}>Get a reset code by email</Text>
             </View>
             <Feather name="chevron-right" size={18} color="#7A1380" />
           </TouchableOpacity>
@@ -256,7 +273,8 @@ export default function SettingsScreen() {
                 style={{ marginTop: 1, marginRight: 8 }}
               />
               <Text style={styles.deleteWarningText}>
-                This permanently deletes your data.
+                This permanently deletes your account, CVs and progress. Type
+                DELETE to confirm.
               </Text>
             </View>
 
@@ -270,9 +288,9 @@ export default function SettingsScreen() {
               />
               <TextInput
                 style={styles.passwordInput}
-                placeholder="Confirm password"
-                placeholderTextColor="#1C101B"
-                secureTextEntry
+                placeholder="Type DELETE"
+                placeholderTextColor="#8A7B87"
+                autoCorrect={false}
                 value={deletePassword}
                 onChangeText={setDeletePassword}
                 autoCapitalize="none"
@@ -296,9 +314,10 @@ export default function SettingsScreen() {
                 style={styles.deleteConfirmBtn}
                 onPress={confirmDeleteAccount}
                 activeOpacity={0.85}
+                disabled={deleting}
               >
                 <Text style={styles.deleteConfirmText}>
-                  Delete{"\n"}account
+                  {deleting ? "Deleting..." : "Delete\naccount"}
                 </Text>
               </TouchableOpacity>
             </View>

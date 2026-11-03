@@ -6,6 +6,7 @@ import {
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -20,9 +21,50 @@ import NotificationBell from "../../../assets/images/Notifications.svg";
 import Shield from "../../../assets/images/Shield.svg";
 import Readiness from "../../../assets/images/SpeedGauge.svg";
 import Stack from "../../../assets/images/Stak.svg";
+import { ErrorBanner, LoadingState } from "../../components/StateViews";
+import { initials, titleCase, useSkillBridge } from "../../services/useSkillBridge";
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { data, stats, loading, refreshing, refresh } = useSkillBridge();
+
+  const matches = data?.matches || [];
+  const requiredSet = new Set(stats.requiredSkills.map((s) => s.toLowerCase()));
+  const progress = data?.progress || [];
+
+  // Onboarding milestones driven by real data
+  const milestones = [
+    {
+      key: "profile",
+      label: "Basic Profile Survey",
+      done: !!data?.profile,
+      route: "/profile-settings",
+    },
+    {
+      key: "cv",
+      label: "CV Upload & AI Extraction",
+      done: stats.hasCV && stats.hasGap,
+      badge: stats.currentSkills.length ? `${stats.currentSkills.length} parsed` : null,
+      route: "/profile-setup",
+    },
+    {
+      key: "matches",
+      label: "Generate Career Matches",
+      done: matches.length > 0,
+      route: "/(tabs)/jobs",
+    },
+    {
+      key: "roadmap",
+      label: "Activate 90–Day\nRoadmap",
+      done: stats.hasRoadmap,
+      route: "/(tabs)/roadmap",
+    },
+  ];
+  const doneCount = milestones.filter((m) => m.done).length;
+  const milestonePct = Math.round((doneCount / milestones.length) * 100);
+  const nextIdx = milestones.findIndex((m) => !m.done);
+
+  const someFailed = (data?.errors || []).length > 0 && (data?.errors || []).length < 7;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -44,36 +86,55 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.profileOutlineCircle}
+            style={[styles.profileOutlineCircle, styles.avatarInitialsCircle]}
             onPress={() => router.push("/(tabs)/profile")}
             hitSlop={8}
-          />
+          >
+            <Text style={styles.avatarInitialsText}>{initials(stats.fullName)}</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Loading your dashboard..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
+        }
       >
+        {someFailed && (
+          <ErrorBanner
+            message="Some data couldn't load. Pull down or tap to retry."
+            onRetry={refresh}
+          />
+        )}
+
         {/* ================= 1. Hero Purple Card ================= */}
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.inductionPill}>
               <View style={styles.whiteDot} />
-              <Text style={styles.inductionPillText}>Day 1 Induction</Text>
+              <Text style={styles.inductionPillText}>
+                {stats.hasRoadmap ? `Day ${stats.dayNumber} of 90` : "Day 1 Induction"}
+              </Text>
             </View>
 
             <Shield width={16} height={20} />
           </View>
 
           <Text style={styles.heroHeadline}>
-            Welcome to SkillBridge,{"\n"}Amaka! 👋
+            Welcome to SkillBridge,{"\n"}{stats.firstName}! 👋
           </Text>
 
           <View style={styles.corridorRow}>
             <Stack width={16} height={16} />
             <Text style={styles.corridorText}>
-              Junior Fintech Data Analyst • Lagos Tech Corridor
+              {[stats.targetRole || "Set your target role", stats.location]
+                .filter(Boolean)
+                .join(" • ")}
             </Text>
           </View>
         </View>
@@ -90,65 +151,69 @@ export default function HomeScreen() {
               </Text>
             </View>
 
-            <Text style={styles.milestonePercentText}>60%{"\n"}Completed</Text>
+            <Text style={styles.milestonePercentText}>
+              {milestonePct}%{"\n"}Completed
+            </Text>
           </View>
 
           {/* Progress Track */}
           <View style={styles.milestoneTrack}>
-            <View style={styles.milestoneFill} />
+            <View style={[styles.milestoneFill, { width: `${milestonePct}%` }]} />
           </View>
 
           {/* Milestone List */}
           <View style={styles.milestoneList}>
-            {/* Step 1 */}
-            <View style={styles.milestoneItem}>
-              <View style={styles.milestoneItemLeft}>
-                <Ionicons name="checkmark-circle" size={18} color="#731F94" />
-                <Text style={styles.milestoneItemText}>
-                  Basic Profile Survey
-                </Text>
-              </View>
-              <Text style={styles.milestoneStatusDone}>Done</Text>
-            </View>
-
-            {/* Step 2 */}
-            <View style={styles.milestoneItem}>
-              <View style={styles.milestoneItemLeft}>
-                <Ionicons name="checkmark-circle" size={18} color="#731F94" />
-                <Text style={styles.milestoneItemText}>
-                  CV Upload & AI Extraction
-                </Text>
-              </View>
-              <Text style={styles.milestoneParsedBadge}>14 parsed</Text>
-            </View>
-
-            {/* Step 3 (Active) */}
-            <TouchableOpacity
-              style={[styles.milestoneItem, styles.milestoneItemActive]}
-              activeOpacity={0.8}
-              onPress={() => router.push("/(tabs)/skills")}
-            >
-              <View style={styles.milestoneItemLeft}>
-                <Ionicons name="radio-button-on" size={18} color="#731F94" />
-                <Text style={[styles.milestoneItemText, { fontWeight: "700" }]}>
-                  Take 15–Min Diagnostic
-                </Text>
-              </View>
-              <View style={styles.upNextBadge}>
-                <Text style={styles.upNextText}>Up Next</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* Step 4 (Locked) */}
-            <View style={styles.milestoneItem}>
-              <View style={styles.milestoneItemLeft}>
-                <Feather name="lock" size={16} color="#A396A6" />
-                <Text style={styles.milestoneItemTextLocked}>
-                  Activate 60–Day Capstone{"\n"}Roadmap
-                </Text>
-              </View>
-              <Text style={styles.lockedText}>Locked</Text>
-            </View>
+            {milestones.map((m, idx) => {
+              if (m.done) {
+                return (
+                  <TouchableOpacity
+                    key={m.key}
+                    style={styles.milestoneItem}
+                    onPress={() => router.push(m.route)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.milestoneItemLeft}>
+                      <Ionicons name="checkmark-circle" size={18} color="#731F94" />
+                      <Text style={styles.milestoneItemText}>{m.label}</Text>
+                    </View>
+                    {m.badge ? (
+                      <Text style={styles.milestoneParsedBadge}>{m.badge}</Text>
+                    ) : (
+                      <Text style={styles.milestoneStatusDone}>Done</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              }
+              if (idx === nextIdx) {
+                return (
+                  <TouchableOpacity
+                    key={m.key}
+                    style={[styles.milestoneItem, styles.milestoneItemActive]}
+                    activeOpacity={0.8}
+                    onPress={() => router.push(m.route)}
+                  >
+                    <View style={styles.milestoneItemLeft}>
+                      <Ionicons name="radio-button-on" size={18} color="#731F94" />
+                      <Text style={[styles.milestoneItemText, { fontWeight: "700" }]}>
+                        {m.label}
+                      </Text>
+                    </View>
+                    <View style={styles.upNextBadge}>
+                      <Text style={styles.upNextText}>Up Next</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+              return (
+                <View key={m.key} style={styles.milestoneItem}>
+                  <View style={styles.milestoneItemLeft}>
+                    <Feather name="lock" size={16} color="#A396A6" />
+                    <Text style={styles.milestoneItemTextLocked}>{m.label}</Text>
+                  </View>
+                  <Text style={styles.lockedText}>Locked</Text>
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -157,191 +222,209 @@ export default function HomeScreen() {
           <Text style={styles.telemetrySectionTitle}>
             Baseline Readiness Telemetry
           </Text>
-          <Text style={styles.realtimeSyncText}>Real–time sync</Text>
+          <Text style={styles.realtimeSyncText}>Pull to sync</Text>
         </View>
 
         <View style={styles.telemetryGrid}>
           {/* Box 1: Readiness */}
-          <View style={styles.telemetryBox}>
+          <TouchableOpacity
+            style={styles.telemetryBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/(tabs)/skills")}
+          >
             <View style={styles.telemetryBoxTop}>
               <Text style={styles.telemetryBoxLabel}>Readiness</Text>
               <Readiness />
             </View>
             <View style={styles.telemetryNumberRow}>
-              <Text style={styles.telemetryNumberBig}>48%</Text>
+              <Text style={styles.telemetryNumberBig}>{stats.readiness}%</Text>
               <Text style={styles.telemetryNumberSub}>CV</Text>
             </View>
             <View style={styles.miniBarTrack}>
-              <View style={[styles.miniBarFill, { width: "48%" }]} />
+              <View style={[styles.miniBarFill, { width: `${stats.readiness}%` }]} />
             </View>
-            <Text style={styles.telemetryCaption}>📈 Unlock 85%+ via Test</Text>
-          </View>
+            <Text style={styles.telemetryCaption}>
+              {stats.missingSkills.length
+                ? `📈 Close ${stats.missingSkills.length} gap${stats.missingSkills.length > 1 ? "s" : ""}`
+                : stats.hasGap
+                  ? "✅ No critical gaps"
+                  : "📄 Upload CV to score"}
+            </Text>
+          </TouchableOpacity>
 
-          {/* Box 2: Applications */}
-          <View style={styles.telemetryBox}>
+          {/* Box 2: Job Matches */}
+          <TouchableOpacity
+            style={styles.telemetryBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/(tabs)/jobs")}
+          >
             <View style={styles.telemetryBoxTop}>
-              <Text style={styles.telemetryBoxLabel}>Applications</Text>
+              <Text style={styles.telemetryBoxLabel}>Job Matches</Text>
               <Feather name="send" size={15} color="#731F94" />
             </View>
-            <Text style={styles.telemetryNumberBig}>0</Text>
+            <Text style={styles.telemetryNumberBig}>{matches.length}</Text>
             <Text style={styles.telemetryCaptionGray}>
-              Unlocks post Sprint 1{"\n"}Capstone
+              {matches.length
+                ? `Best fit: ${matches[0].matchPercentage}%`
+                : "Generate matches on the\nJobs tab"}
             </Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Box 3: Sprint Track */}
-          <View style={styles.telemetryBox}>
+          <TouchableOpacity
+            style={styles.telemetryBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/(tabs)/roadmap")}
+          >
             <View style={styles.telemetryBoxTop}>
-              <Text style={styles.telemetryBoxLabel}>Sprint Track</Text>
+              <Text style={styles.telemetryBoxLabel}>Roadmap</Text>
               <Ionicons name="calendar-outline" size={16} color="#731F94" />
             </View>
             <View style={styles.telemetryNumberRow}>
-              <Text style={styles.telemetryNumberBig}>Day 1</Text>
-              <Text style={styles.telemetryNumberSub}>/ 60</Text>
+              <Text style={styles.telemetryNumberBig}>
+                {stats.hasRoadmap ? `Day ${stats.dayNumber}` : "—"}
+              </Text>
+              <Text style={styles.telemetryNumberSub}>/ 90</Text>
             </View>
             <View style={styles.telemetryTagRow}>
               <View style={styles.tinyPurpleDot} />
-              <Text style={styles.telemetryTagText}>Ready to Initiate</Text>
+              <Text style={styles.telemetryTagText}>
+                {stats.hasRoadmap
+                  ? `${stats.doneTasks}/${stats.tasks.length} tasks done`
+                  : "Ready to Initiate"}
+              </Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
-          {/* Box 4: Skill Badges */}
-          <View style={styles.telemetryBox}>
+          {/* Box 4: Learning */}
+          <TouchableOpacity
+            style={styles.telemetryBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/(tabs)/learn")}
+          >
             <View style={styles.telemetryBoxTop}>
-              <Text style={styles.telemetryBoxLabel}>Skill Badges</Text>
+              <Text style={styles.telemetryBoxLabel}>Learning</Text>
               <Ionicons name="trophy-outline" size={16} color="#731F94" />
             </View>
             <View style={styles.telemetryNumberRow}>
-              <Text style={styles.telemetryNumberBig}>0</Text>
-              <Text style={styles.telemetryNumberSub}>/ 6</Text>
+              <Text style={styles.telemetryNumberBig}>{stats.completedProgress}</Text>
+              <Text style={styles.telemetryNumberSub}>/ {progress.length}</Text>
             </View>
             <Text style={styles.telemetryCaptionGray}>
-              Earn Level 1 in Test
+              {progress.length ? "Resources completed" : "Start a resource to track"}
             </Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* ================= 4. Extracted Skills Container ================= */}
-        <View style={styles.card}>
+        <TouchableOpacity
+          style={styles.card}
+          activeOpacity={0.9}
+          onPress={() => router.push("/(tabs)/skills")}
+        >
           <View style={styles.extractedHeaderRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.extractedTitle}>Extracted Skills</Text>
               <Text style={styles.extractedSubtitle}>
-                Parsed from CV • Pending diagnostic verification
+                {stats.currentSkills.length
+                  ? "Parsed from CV • Highlighted skills match your target role"
+                  : "No skills yet — upload your CV to extract them"}
               </Text>
             </View>
             <MaterialCommunityIcons name="creation" size={18} color="#731F94" />
           </View>
 
           <View style={styles.skillsTagWrap}>
-            <View style={styles.skillTagVerified}>
-              <Ionicons name="checkmark" size={12} color="#731F94" />
-              <Text style={styles.skillTagTextVerified}>Econometrics</Text>
-            </View>
-
-            <View style={styles.skillTagVerified}>
-              <Ionicons name="checkmark" size={12} color="#731F94" />
-              <Text style={styles.skillTagTextVerified}>Advanced Excel</Text>
-            </View>
-
-            <View style={styles.skillTagVerified}>
-              <Ionicons name="checkmark" size={12} color="#731F94" />
-              <Text style={styles.skillTagTextVerified}>
-                Financial Modeling
-              </Text>
-            </View>
-
-            <View style={styles.skillTagPending}>
-              <Feather name="info" size={12} color="#731F94" />
-              <Text style={styles.skillTagTextPending}>SQL (needs test)</Text>
-            </View>
-
-            <View style={styles.skillTagPending}>
-              <Feather name="info" size={12} color="#731F94" />
-              <Text style={styles.skillTagTextPending}>
-                Python (needs test)
-              </Text>
-            </View>
+            {stats.currentSkills.slice(0, 10).map((skill) =>
+              requiredSet.has(skill.toLowerCase()) || requiredSet.size === 0 ? (
+                <View key={skill} style={styles.skillTagVerified}>
+                  <Ionicons name="checkmark" size={12} color="#731F94" />
+                  <Text style={styles.skillTagTextVerified}>{titleCase(skill)}</Text>
+                </View>
+              ) : (
+                <View key={skill} style={styles.skillTagPending}>
+                  <Feather name="info" size={12} color="#731F94" />
+                  <Text style={styles.skillTagTextPending}>{titleCase(skill)}</Text>
+                </View>
+              ),
+            )}
+            {stats.missingSkills.slice(0, 3).map((skill) => (
+              <View key={`missing-${skill}`} style={styles.skillTagPending}>
+                <Feather name="plus" size={12} color="#731F94" />
+                <Text style={styles.skillTagTextPending}>{titleCase(skill)} (gap)</Text>
+              </View>
+            ))}
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* ================= 5. Preliminary Role Matches ================= */}
         <View style={styles.card}>
           <View style={styles.roleMatchesHeaderRow}>
             <View>
               <Text style={styles.roleMatchesTitle}>
-                Preliminary Role Matches
+                {matches.length ? "Top Role Matches" : "Preliminary Role Matches"}
               </Text>
               <Text style={styles.roleMatchesSubtitle}>
-                Lagos Fintech market compatibility
+                Ranked by skill compatibility
               </Text>
             </View>
 
             <View style={styles.lockedPill}>
-              <Feather name="lock" size={11} color="#731F94" />
-              <Text style={styles.lockedPillText}>Locked</Text>
+              <Feather name={matches.length ? "zap" : "lock"} size={11} color="#731F94" />
+              <Text style={styles.lockedPillText}>{matches.length ? "Live" : "Locked"}</Text>
             </View>
           </View>
 
-          {/* Job Card 1: Flutterwave */}
-          <View style={styles.jobCard}>
-            <View style={styles.jobTopRow}>
-              <View style={styles.companyLogoBox}>
-                <Text style={styles.companyLogoText}>FW</Text>
-              </View>
-              <View style={styles.jobTitleCol}>
-                <Text style={styles.jobTitleText}>
-                  Junior Fintech Data Analyst
-                </Text>
-                <Text style={styles.jobCompanyText}>
-                  Flutterwave • Victoria Island, Lagos
-                </Text>
-              </View>
-              <Text style={styles.matchPercentText}>74% Match</Text>
-            </View>
+          {matches.length === 0 ? (
+            <TouchableOpacity onPress={() => router.push("/(tabs)/jobs")}>
+              <Text style={styles.roleMatchesSubtitle}>
+                No matches yet. Open the Jobs tab to generate your matches →
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            matches.slice(0, 2).map((m) => {
+              const opp = m.opportunity || {};
+              return (
+                <TouchableOpacity
+                  key={m.id}
+                  style={styles.jobCard}
+                  activeOpacity={0.85}
+                  onPress={() => router.push("/(tabs)/jobs")}
+                >
+                  <View style={styles.jobTopRow}>
+                    <View style={styles.companyLogoBox}>
+                      <Text style={styles.companyLogoText}>{initials(opp.company)}</Text>
+                    </View>
+                    <View style={styles.jobTitleCol}>
+                      <Text style={styles.jobTitleText}>{opp.title}</Text>
+                      <Text style={styles.jobCompanyText}>
+                        {[opp.company, opp.location].filter(Boolean).join(" • ")}
+                      </Text>
+                    </View>
+                    <Text style={styles.matchPercentText}>{m.matchPercentage}% Match</Text>
+                  </View>
 
-            <View style={styles.jobBottomRow}>
-              <Text style={styles.salaryText}>₦280k - ₦320k / mo</Text>
-              <View style={styles.validateRow}>
-                <MaterialCommunityIcons
-                  name="shield-search"
-                  size={14}
-                  color="#731F94"
-                />
-                <Text style={styles.validateText}>Validate via Diagnostic</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Job Card 2: Moniepoint */}
-          <View style={styles.jobCard}>
-            <View style={styles.jobTopRow}>
-              <View style={styles.companyLogoBox}>
-                <Text style={styles.companyLogoText}>MP</Text>
-              </View>
-              <View style={styles.jobTitleCol}>
-                <Text style={styles.jobTitleText}>
-                  Associate Analytics Engineer
-                </Text>
-                <Text style={styles.jobCompanyText}>
-                  Moniepoint • Lekki Phase 1 / Hybrid
-                </Text>
-              </View>
-              <Text style={styles.matchPercentText}>71% Match</Text>
-            </View>
-
-            <View style={styles.jobBottomRow}>
-              <Text style={styles.salaryText}>₦260k - ₦300k / mo</Text>
-              <View style={styles.validateRow}>
-                <MaterialCommunityIcons
-                  name="shield-search"
-                  size={14}
-                  color="#731F94"
-                />
-                <Text style={styles.validateText}>Validate via Diagnostic</Text>
-              </View>
-            </View>
-          </View>
+                  <View style={styles.jobBottomRow}>
+                    <Text style={styles.salaryText}>
+                      {titleCase((opp.type || "role").replace("_", " "))} • {titleCase(opp.workMode || "onsite")}
+                    </Text>
+                    <View style={styles.validateRow}>
+                      <MaterialCommunityIcons
+                        name="shield-search"
+                        size={14}
+                        color="#731F94"
+                      />
+                      <Text style={styles.validateText}>
+                        {(m.missingSkills || []).length
+                          ? `${m.missingSkills.length} gap${m.missingSkills.length > 1 ? "s" : ""} to close`
+                          : "Ready to apply"}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
 
         {/* ================= 6. Cohort Invitation Banner ================= */}
@@ -355,25 +438,31 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.cohortInfoCol}>
-            <Text style={styles.cohortTag}>
-              Cohort Invitation • 16 spots left
-            </Text>
-            <Text style={styles.cohortTitle}>
-              Lekki–Yaba Analyst Cohort #15
-            </Text>
+            <Text style={styles.cohortTag}>SkillBridge Pro</Text>
+            <Text style={styles.cohortTitle}>Join an Analyst Cohort</Text>
             <Text style={styles.cohortSubtitle}>
-              Starts this Monday • Peer reviews & mock fintech interviews.
+              Peer reviews, mentor sessions & mock interviews.
             </Text>
           </View>
 
           <Feather name="chevron-right" size={20} color="#731F94" />
         </TouchableOpacity>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  avatarInitialsCircle: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitialsText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#731F94",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

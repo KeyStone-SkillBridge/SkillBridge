@@ -1,27 +1,45 @@
 import {
   Feather,
-  FontAwesome5,
   Ionicons,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
 import {
-  Alert,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import LogoSvg from "../../../assets/images/logo.svg";
+import { EmptyCard, LoadingState } from "../../components/StateViews";
+import { skillIcon } from "../../services/skillActions";
+import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+
+const tierFor = (pct) =>
+  pct >= 80 ? "HIRE–READY" : pct >= 60 ? "NEARLY READY" : pct >= 35 ? "DEVELOPING" : "GETTING STARTED";
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const [directInMail, setDirectInMail] = useState(true);
+  const { data, stats, loading, refreshing, refresh } = useSkillBridge();
+
+  const profile = data?.profile || {};
+  const requiredSet = new Set(stats.requiredSkills.map((s) => s.toLowerCase()));
+  const nextTask = stats.tasks.find((t) => t.status !== "done");
+  const learning = stats.inProgress;
+  const latestCv = data?.cvs?.[0];
+
+  const details = [
+    { icon: "target", label: "Career Goal", value: profile.careerGoal },
+    { icon: "book-open", label: "Education", value: profile.education },
+    { icon: "briefcase", label: "Experience", value: profile.experience },
+    { icon: "map-pin", label: "Location", value: profile.location },
+    { icon: "phone", label: "Phone", value: profile.phone },
+    { icon: "mail", label: "Email", value: data?.me?.email },
+  ].filter((d) => d.value);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -33,7 +51,7 @@ export default function ProfileScreen() {
           <LogoSvg width={30} height={30} />
           <View style={{ marginLeft: 8 }}>
             <Text style={styles.brandTitle}>SkillBridge</Text>
-            <Text style={styles.brandSubtitle}>PROFILE BADGES</Text>
+            <Text style={styles.brandSubtitle}>PROFILE</Text>
           </View>
         </View>
 
@@ -53,9 +71,15 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Loading your profile..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
+        }
       >
         {/* ================= 1. User Identity Hero Card ================= */}
         <View style={styles.heroCard}>
@@ -70,29 +94,37 @@ export default function ProfileScreen() {
 
             <View style={styles.heroMetaCol}>
               <View style={styles.nameRow}>
-                <Text style={styles.heroName}>Amaka Okafor</Text>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={16}
-                  color="#731F94"
-                  style={{ marginLeft: 6 }}
-                />
+                <Text style={styles.heroName}>{stats.fullName || "Your Name"}</Text>
+                {data?.me?.isVerified && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color="#731F94"
+                    style={{ marginLeft: 6 }}
+                  />
+                )}
               </View>
-              <Text style={styles.heroSubtitle}>B.Sc Economics</Text>
+              <Text style={styles.heroSubtitle}>
+                {stats.targetRole || profile.education || data?.me?.email || ""}
+              </Text>
             </View>
           </View>
 
           {/* Hire-Ready Banner */}
           <View style={styles.hireReadyBox}>
             <View style={styles.hireReadyNumberWrap}>
-              <Text style={styles.hireReadyPercent}>84</Text>
+              <Text style={styles.hireReadyPercent}>{stats.readiness}</Text>
               <Text style={styles.hireReadyPercentSymbol}>%</Text>
             </View>
 
             <View style={styles.hireReadyMetaCol}>
-              <Text style={styles.hireReadyLabel}>TIER 1 HIRE–READY</Text>
+              <Text style={styles.hireReadyLabel}>{tierFor(stats.readiness)}</Text>
               <Text style={styles.hireReadyCohortText}>
-                Top 8% in Lagos Cohort
+                {stats.missingSkills.length
+                  ? `${stats.missingSkills.length} skill gap${stats.missingSkills.length > 1 ? "s" : ""} remaining`
+                  : stats.hasGap
+                    ? "No critical gaps"
+                    : "Upload your CV to get scored"}
               </Text>
             </View>
 
@@ -108,417 +140,216 @@ export default function ProfileScreen() {
                 color="#731F94"
               />
               <Text style={styles.velocityText}>
-                Sprint Velocity: Day 14 of 60
+                {stats.hasRoadmap ? `Roadmap: Day ${stats.dayNumber} of 90` : "Roadmap not started"}
               </Text>
             </View>
-            <Text style={styles.badgesCountText}>4 of 6 Badges</Text>
+            <Text style={styles.badgesCountText}>
+              {stats.doneTasks} of {stats.tasks.length} Tasks
+            </Text>
           </View>
 
           <View style={styles.velocityTrack}>
-            <View style={styles.velocityFill} />
+            <View style={[styles.velocityFill, { width: `${stats.taskPct}%` }]} />
           </View>
 
-          {/* Streak Sub-stats */}
+          {/* Sub-stats */}
           <View style={styles.streakSubRow}>
             <View style={styles.streakWrap}>
               <MaterialCommunityIcons name="fire" size={14} color="#731F94" />
-              <Text style={styles.streakText}>12–day study streak</Text>
+              <Text style={styles.streakText}>
+                {stats.completedProgress} resource{stats.completedProgress === 1 ? "" : "s"} completed
+              </Text>
             </View>
-            <Text style={styles.nextCapstoneText}>Next: Ledger Capstone</Text>
+            {!!nextTask && (
+              <Text style={styles.nextCapstoneText} numberOfLines={1}>
+                Next: {nextTask.title}
+              </Text>
+            )}
           </View>
         </View>
 
-        {/* ================= 2. Cryptographic Skill Matrix Header ================= */}
+        {/* ================= 2. Skill Matrix ================= */}
         <View style={styles.matrixHeaderRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.matrixSectionTitle}>
-              Cryptographic Skill Matrix
-            </Text>
+            <Text style={styles.matrixSectionTitle}>Skill Matrix</Text>
             <Text style={styles.matrixSectionSubtitle}>
-              Immutable proof synced via Lagos Sandbox API
+              Extracted from your CV and confirmed by you
             </Text>
           </View>
 
           <View style={styles.w12Badge}>
-            <Text style={styles.w12BadgeText}>W–12{"\n"}Verified</Text>
+            <Text style={styles.w12BadgeText}>
+              {stats.currentSkills.length}{"\n"}Skills
+            </Text>
           </View>
         </View>
 
-        {/* Badge 1: SQL Expert */}
-        <View style={styles.card}>
-          <View style={styles.badgeTopRow}>
-            <View style={styles.badgeIconWrap}>
-              <MaterialCommunityIcons
-                name="database"
-                size={22}
-                color="#731F94"
-              />
-            </View>
+        {stats.currentSkills.length === 0 ? (
+          <EmptyCard
+            icon="award"
+            title="No skills on your profile yet"
+            message="Upload your CV and our AI will extract your skills automatically."
+            ctaLabel="Upload CV"
+            onPress={() => router.push("/profile-settings")}
+          />
+        ) : (
+          stats.currentSkills.map((skill) => {
+            const required = requiredSet.has(skill.toLowerCase());
+            return (
+              <View key={skill} style={styles.card}>
+                <View style={styles.badgeTopRow}>
+                  <View style={styles.badgeIconWrap}>
+                    <MaterialCommunityIcons name={skillIcon(skill)} size={20} color="#731F94" />
+                  </View>
 
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.badgeTitleRow}>
-                <Text style={styles.badgeTitle}>SQL Expert Badge</Text>
-                <Ionicons name="checkmark-circle" size={13} color="#731F94" />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <View style={styles.badgeTitleRow}>
+                      <Text style={styles.badgeTitle}>{titleCase(skill)}</Text>
+                      {required && <Ionicons name="checkmark-circle" size={13} color="#731F94" />}
+                    </View>
+                    <Text style={styles.badgeValidationText}>
+                      {required
+                        ? `Required for ${stats.targetRole || "your target role"}`
+                        : "Transferable skill"}
+                    </Text>
+                  </View>
+
+                  <View style={styles.scoreWrap}>
+                    <Text style={styles.masteryLabel}>{required ? "CORE" : "BONUS"}</Text>
+                  </View>
+                </View>
               </View>
-              <Text style={styles.badgeValidationText}>
-                UNILAG Registrar API & Sandbox test
-              </Text>
-              <Text style={styles.badgeIdText}>
-                ID: #SKB–8091 • Block #10928
-              </Text>
-            </View>
+            );
+          })
+        )}
 
-            <View style={styles.scoreWrap}>
-              <Text style={styles.scoreText}>
-                <Text style={styles.scoreBig}>98</Text>/100
-              </Text>
-              <Text style={styles.masteryLabel}>MASTERY</Text>
-            </View>
-          </View>
-
-          <View style={styles.chipsAndActionRow}>
-            <View style={styles.skillChipsGroup}>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Window Functions</Text>
+        {/* In-progress learning (like the "active badge" card) */}
+        {learning.map((p) => (
+          <View key={p.id} style={styles.card}>
+            <View style={styles.badgeTopRow}>
+              <View style={styles.badgeIconWrap}>
+                <MaterialCommunityIcons name="laptop" size={20} color="#731F94" />
               </View>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Complex CTEs</Text>
-              </View>
-            </View>
 
-            <TouchableOpacity
-              style={styles.pdfDownloadBtn}
-              onPress={() =>
-                Alert.alert("Download", "Downloading SQL Badge PDF...")
-              }
-            >
-              <Feather name="arrow-down-circle" size={14} color="#731F94" />
-              <Text style={styles.pdfBtnText}>PDF</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Badge 2: EDA & Statistical Modeling */}
-        <View style={styles.card}>
-          <View style={styles.badgeTopRow}>
-            <View style={styles.badgeIconWrap}>
-              <Feather name="trending-up" size={20} color="#731F94" />
-            </View>
-
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.badgeTitle}>EDA & Statistical Modeling</Text>
-              <Text style={styles.badgeValidationText}>
-                Verified vs Moniepoint transaction schema
-              </Text>
-              <Text style={styles.badgeIdText}>
-                ID: #SKB–8224 • Live Audit Passed
-              </Text>
-            </View>
-
-            <View style={styles.scoreWrap}>
-              <View style={styles.scoreBadgeTop}>
-                <Ionicons name="checkmark-circle" size={12} color="#731F94" />
-                <Text style={styles.scoreText}>
-                  <Text style={styles.scoreBig}>94</Text>/100
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.badgeTitle}>{p.recommendation?.title || "Learning resource"}</Text>
+                <Text style={styles.badgeValidationText}>
+                  {p.recommendation?.skill?.name || "In progress"}
                 </Text>
               </View>
-              <Text style={styles.masteryLabel}>ADVANCED</Text>
-            </View>
-          </View>
 
-          <View style={styles.chipsAndActionRow}>
-            <View style={styles.skillChipsGroup}>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Python / Polars</Text>
-              </View>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Risk Matrices</Text>
+              <View style={styles.scoreWrap}>
+                <Text style={styles.scoreBig}>{p.progressPercentage || 0}%</Text>
+                <Text style={styles.activeLabel}>ACTIVE</Text>
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.pdfDownloadBtn}
-              onPress={() =>
-                Alert.alert("Download", "Downloading EDA Badge PDF...")
-              }
-            >
-              <Feather name="arrow-down-circle" size={14} color="#731F94" />
-              <Text style={styles.pdfBtnText}>PDF</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Badge 3: Financial Statement Analysis */}
-        <View style={styles.card}>
-          <View style={styles.badgeTopRow}>
-            <View style={styles.badgeIconWrap}>
-              <FontAwesome5 name="university" size={16} color="#731F94" />
+            <View style={styles.velocityTrack}>
+              <View style={[styles.velocityFill, { width: `${p.progressPercentage || 0}%` }]} />
             </View>
 
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.badgeTitle}>
-                Financial Statement Analysis
-              </Text>
-              <Text style={styles.badgeValidationText}>
-                Sterling Bank quantitative benchmark criteria
-              </Text>
-              <Text style={styles.badgeIdText}>
-                ID: #SKB–7915 • Peer Reviewed
-              </Text>
-            </View>
-
-            <View style={styles.scoreWrap}>
-              <View style={styles.scoreBadgeTop}>
-                <Ionicons name="checkmark-circle" size={12} color="#731F94" />
-                <Text style={styles.scoreText}>
-                  <Text style={styles.scoreBig}>92</Text>/100
-                </Text>
-              </View>
-              <Text style={styles.masteryLabel}>VERIFIED</Text>
+            <View style={styles.activeCardFooter}>
+              <View />
+              <TouchableOpacity
+                style={styles.resumeModuleRow}
+                onPress={() => router.push("/(tabs)/learn")}
+              >
+                <Text style={styles.resumeModuleText}>Resume</Text>
+                <Feather name="arrow-right" size={13} color="#731F94" />
+              </TouchableOpacity>
             </View>
           </View>
+        ))}
 
-          <View style={styles.chipsAndActionRow}>
-            <View style={styles.skillChipsGroup}>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Ratio Auditing</Text>
-              </View>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Cash Flow Models</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.pdfDownloadBtn}
-              onPress={() =>
-                Alert.alert("Download", "Downloading Financial Analysis PDF...")
-              }
-            >
-              <Feather name="arrow-down-circle" size={14} color="#731F94" />
-              <Text style={styles.pdfBtnText}>PDF</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Badge 4: Advanced MS Excel */}
-        <View style={styles.card}>
-          <View style={styles.badgeTopRow}>
-            <View style={styles.badgeIconWrap}>
-              <MaterialCommunityIcons
-                name="table-large"
-                size={20}
-                color="#731F94"
-              />
-            </View>
-
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.badgeTitleRow}>
-                <Text style={styles.badgeTitle}>Advanced MS Excel</Text>
-                <Ionicons name="checkmark-circle" size={13} color="#731F94" />
-              </View>
-              <Text style={styles.badgeValidationText}>
-                Pivot Engineering & Dynamic Power Queries
-              </Text>
-              <Text style={styles.badgeIdText}>ID: #SKB–7710 • Certified</Text>
-            </View>
-
-            <View style={styles.scoreWrap}>
-              <Text style={styles.scoreText}>
-                <Text style={styles.scoreBig}>95</Text>/100
-              </Text>
-              <Text style={styles.masteryLabel}>MASTERY</Text>
-            </View>
-          </View>
-
-          <View style={styles.chipsAndActionRow}>
-            <View style={styles.skillChipsGroup}>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>Power Pivot</Text>
-              </View>
-              <View style={styles.skillChip}>
-                <Text style={styles.skillChipText}>VBA Macros</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.pdfDownloadBtn}
-              onPress={() =>
-                Alert.alert("Download", "Downloading MS Excel PDF...")
-              }
-            >
-              <Feather name="arrow-down-circle" size={14} color="#731F94" />
-              <Text style={styles.pdfBtnText}>PDF</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Badge 5: Fintech Core & Ledger Reconciliation (Active 65%) */}
-        <View style={styles.card}>
-          <View style={styles.badgeTopRow}>
-            <View style={styles.badgeIconWrap}>
-              <MaterialCommunityIcons name="laptop" size={20} color="#731F94" />
-            </View>
-
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.badgeTitle}>
-                Fintech Core & Ledger Reconciliation
-              </Text>
-              <Text style={styles.badgeValidationText}>
-                Unlocks automatically upon Capstone 1 review
-              </Text>
-              <Text style={styles.sprintTargetText}>Sprint Week 3 Target</Text>
-            </View>
-
-            <View style={styles.scoreWrap}>
-              <Text style={styles.scoreBig}>65%</Text>
-              <Text style={styles.activeLabel}>ACTIVE</Text>
-            </View>
-          </View>
-
-          <View style={styles.velocityTrack}>
-            <View style={[styles.velocityFill, { width: "65%" }]} />
-          </View>
-
-          <View style={styles.activeCardFooter}>
-            <View style={styles.modulesRemainingWrap}>
-              <Feather name="lock" size={11} color="#556070" />
-              <Text style={styles.modulesRemainingText}>
-                2 Modules remaining
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.resumeModuleRow}
-              onPress={() => router.push("/(tabs)/learn")}
-            >
-              <Text style={styles.resumeModuleText}>Resume Module</Text>
-              <Feather name="arrow-right" size={13} color="#731F94" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ================= 3. Cryptographic Credential Box ================= */}
+        {/* ================= 3. Profile Details ================= */}
         <View style={styles.credentialContainer}>
           <View style={styles.credentialTopHeader}>
             <View style={styles.qrIconSquare}>
-              <MaterialCommunityIcons
-                name="qrcode-scan"
-                size={20}
-                color="#731F94"
-              />
+              <Feather name="user" size={20} color="#731F94" />
             </View>
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={styles.credTitle}>Cryptographic Credential</Text>
-              <Text style={styles.credSub}>NDPR & ISO–27001 COMPLIANT</Text>
-            </View>
-
-            <View style={styles.liveSyncPill}>
-              <View style={styles.liveSyncDot} />
-              <Text style={styles.liveSyncText}>Live Sync</Text>
-            </View>
-          </View>
-
-          {/* Inner Token Digest Card */}
-          <View style={styles.tokenDigestCard}>
-            <View style={styles.qrPlaceholderBox}>
-              <Ionicons name="qr-code-outline" size={48} color="#731F94" />
-            </View>
-
-            <View style={styles.digestMetaCol}>
-              <Text style={styles.digestLabel}>TOKEN DIGEST</Text>
-              <Text style={styles.digestCode}>NG–DA–2024–8841–A0</Text>
-              <Text style={styles.digestSigner}>
-                Signer: UNILAG Deanery / SkillBridge Lagos Validator
+              <Text style={styles.credTitle}>Profile Details</Text>
+              <Text style={styles.credSub}>
+                {latestCv ? `CV: ${latestCv.fileName}` : "NO CV UPLOADED"}
               </Text>
-              <View style={styles.encryptedRow}>
-                <Feather name="lock" size={10} color="#731F94" />
-                <Text style={styles.encryptedText}>
-                  Encrypted ECDSA SHA–256
-                </Text>
-              </View>
             </View>
           </View>
 
-          {/* Action 1: Add to LinkedIn */}
-          <TouchableOpacity
-            style={styles.linkedInBtn}
-            activeOpacity={0.88}
-            onPress={() =>
-              Alert.alert(
-                "LinkedIn",
-                "Redirecting to add credential to LinkedIn profile...",
-              )
-            }
-          >
-            <Feather name="link" size={15} color="#FFFFFF" />
-            <Text style={styles.linkedInBtnText}>
-              Add Verified Credential to LinkedIn Profile
-            </Text>
-          </TouchableOpacity>
+          {!!profile.bio && <Text style={styles.detailBio}>{profile.bio}</Text>}
 
-          {/* Action 2: Download PDF Dossier */}
+          {details.length === 0 ? (
+            <Text style={styles.detailEmpty}>
+              Your profile is empty. Add your details in Profile Settings.
+            </Text>
+          ) : (
+            details.map((d) => (
+              <View key={d.label} style={styles.detailRow}>
+                <Feather name={d.icon} size={14} color="#731F94" />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.detailLabel}>{d.label}</Text>
+                  <Text style={styles.detailValue}>{d.value}</Text>
+                </View>
+              </View>
+            ))
+          )}
+
           <TouchableOpacity
             style={styles.dossierBtn}
             activeOpacity={0.85}
-            onPress={() =>
-              Alert.alert(
-                "PDF Dossier",
-                "Downloading complete verified credential dossier...",
-              )
-            }
+            onPress={() => router.push("/profile-settings")}
           >
-            <Feather name="file-text" size={15} color="#731F94" />
+            <Feather name="edit-2" size={15} color="#731F94" />
             <Text style={styles.dossierBtnText}>
-              Download Verified PDF Skill Dossier
+              {latestCv ? "Edit Profile & Replace CV" : "Edit Profile & Upload CV"}
             </Text>
           </TouchableOpacity>
-
-          {/* Direct InMail Switcher */}
-          <View style={styles.inMailCard}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <View style={styles.inMailTitleRow}>
-                <Text style={styles.inMailTitle}>
-                  Lagos FinTech Direct InMail
-                </Text>
-                <View style={styles.inMailDot} />
-              </View>
-              <Text style={styles.inMailDesc}>
-                Allows Moniepoint, Flutterwave, and Sterling Bank talent leads
-                to message Amaka directly.
-              </Text>
-            </View>
-
-            <Switch
-              value={directInMail}
-              onValueChange={setDirectInMail}
-              trackColor={{ false: "#D1C2CE", true: "#731F94" }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-        </View>
-
-        {/* ================= 4. Accreditation Notice & Settings CTA ================= */}
-        <View style={styles.registryNoticeRow}>
-          <Feather name="shield" size={13} color="#731F94" />
-          <Text style={styles.registryNoticeText}>
-            SkillBridge Career Acceleration • Verified Cohort Registry
-          </Text>
         </View>
 
         <TouchableOpacity
           style={styles.profileSettingsBtn}
           activeOpacity={0.88}
-          onPress={() => router.push("/profile-settings")}
+          onPress={() => router.push("/settings")}
         >
-          <Text style={styles.profileSettingsBtnText}>Profile Settings</Text>
+          <Text style={styles.profileSettingsBtnText}>Account Settings</Text>
           <Ionicons name="settings" size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  detailBio: {
+    fontSize: 12,
+    color: "#3C303B",
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  detailEmpty: {
+    fontSize: 12,
+    color: "#7B6F84",
+    marginBottom: 10,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0E5F7",
+  },
+  detailLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#7B6F84",
+    letterSpacing: 0.3,
+  },
+  detailValue: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#131B2A",
+    marginTop: 2,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

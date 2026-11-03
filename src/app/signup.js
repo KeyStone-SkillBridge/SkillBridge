@@ -1,5 +1,4 @@
 import { Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
@@ -19,8 +18,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import LogoSvg from "../../assets/images/logo.svg";
+import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
+import { updateAppState } from "../services/session";
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -36,7 +38,7 @@ export default function SignUpScreen() {
   const isFormValid =
     fullName.trim() !== "" &&
     email.trim() !== "" &&
-    password.trim() !== "" &&
+    password.length >= 8 &&
     !emailError &&
     agreeTerms &&
     !loading;
@@ -62,37 +64,51 @@ export default function SignUpScreen() {
     const cleanName = fullName.trim();
 
     try {
-      const payload = {
+      // 1) Create the account.
+      await authService.register({
         email: cleanEmail,
         password: password,
-        full_name: cleanName,
-        name: cleanName,
-      };
-
-      const response = await authService.register(payload);
-      const data = response?.data;
-
-      // If the backend returns an initial session/verification token, cache it
-      const token = data?.token || data?.access_token || data?.data?.token;
-      if (token) {
-        await AsyncStorage.setItem("user_token", token);
-      }
-
-      // Navigate to OTP verification screen with user details
-      router.push({
-        pathname: "/verify-otp",
-        params: {
-          email: cleanEmail,
-          fullName: cleanName,
-          flow: "registration",
-        },
+        fullName: cleanName,
       });
+
+      await updateAppState({ onboardingComplete: false, fullName: cleanName });
+
+      // 2) Try to log in right away. If the server rejects because the account
+      //    isn't verified yet (403 / "not verified" message), redirect to the
+      //    OTP screen so the user can enter the code from the email they just got.
+      try {
+        await authService.loginAndStore({ email: cleanEmail, password });
+        await AsyncStorage.setItem("already_onboarded", "true");
+        router.replace("/profile-setup");
+      } catch (loginErr) {
+        const msg = (loginErr?.response?.data?.message || "").toLowerCase();
+        const isVerifyError =
+          loginErr?.response?.status === 403 ||
+          msg.includes("verif") ||
+          msg.includes("not verified") ||
+          msg.includes("confirm");
+
+        if (isVerifyError) {
+          // Server requires email verification before login — show OTP screen.
+          // Pass password so verify-otp can log in after the code is confirmed.
+          router.replace({
+            pathname: "/verify-otp",
+            params: { email: cleanEmail, password, flow: "registration" },
+          });
+        } else {
+          Alert.alert(
+            "Account created",
+            "Your account was created, but sign-in failed. Please log in manually.\n\n" +
+              getErrorMessage(loginErr, ""),
+          );
+          router.replace("/login");
+        }
+      }
     } catch (error) {
-      const serverMessage =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Unable to create account. Please check your internet connection and try again.";
+      const serverMessage = getErrorMessage(
+        error,
+        "Unable to create account. Please check your internet connection and try again.",
+      );
 
       Alert.alert("Registration Error", serverMessage);
     } finally {
@@ -196,6 +212,14 @@ export default function SignUpScreen() {
                   />
                 </TouchableOpacity>
               </View>
+              {password.length > 0 && password.length < 8 ? (
+                <View style={styles.errorRow}>
+                  <MaterialIcons name="warning" size={16} color="#E53935" />
+                  <Text style={styles.errorText}>
+                    Password must be at least 8 characters
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
             {/* Checkbox: Terms of Service */}

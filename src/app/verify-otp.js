@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -18,15 +17,18 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import LogoSvg from "../../assets/images/logo.svg";
+import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
 
 export default function VerifyOtpScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
-  // Email passed from registration or reset flow
+  // Email / password / flow passed from signup or forgot-password
   const userEmail = params?.email || "your email";
+  const userPassword = params?.password || "";
   const flow = params?.flow || "registration";
 
   // 6-digit OTP code state
@@ -81,30 +83,35 @@ export default function VerifyOtpScreen() {
     setLoading(true);
 
     try {
-      let token = null;
-
       if (flow === "registration") {
-        // Attempt backend code verification
-        try {
-          const res = await authService.verifyResetCode({
-            email: userEmail,
-            code: fullCode,
-          });
-          token = res?.data?.token || res?.data?.access_token;
-        } catch (backendErr) {
-          console.log(
-            "Code verification endpoint notice:",
-            backendErr.response?.data || backendErr.message,
+        // The API has no email-verification endpoint — verify-reset-code is for
+        // password resets only and will crash (500) if called with a signup OTP.
+        // We land here only if the server blocked login because the account is
+        // unverified. At that point we can't do much from the app side; just try
+        // logging in again (the user may have clicked the email link by now) or
+        // send them to login manually.
+        if (!userPassword) {
+          Alert.alert(
+            "Check your email",
+            "Please open the verification link in the email we sent you, then log in.",
           );
+          router.replace("/login");
+          return;
         }
-
-        // Cache session token if provided
-        if (token) {
-          await AsyncStorage.setItem("user_token", token);
+        try {
+          await authService.loginAndStore({ email: userEmail, password: userPassword });
+          await AsyncStorage.setItem("already_onboarded", "true");
+          router.replace("/profile-setup");
+        } catch (loginErr) {
+          const msg = (loginErr?.response?.data?.message || "").toLowerCase();
+          Alert.alert(
+            "Not verified yet",
+            msg.includes("verif")
+              ? "Your email isn't verified yet. Please open the link in the email we sent you, then tap Retry."
+              : "Sign-in failed. Please log in manually.",
+          );
+          router.replace("/login");
         }
-
-        // Proceed forward into user profile customization
-        router.push("/profile-setup");
       } else {
         // Password Reset flow
         await authService.verifyResetCode({
@@ -118,12 +125,7 @@ export default function VerifyOtpScreen() {
         });
       }
     } catch (error) {
-      const errorMsg =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Verification code is invalid or has expired.";
-
+      const errorMsg = getErrorMessage(error, "Verification code is invalid or has expired.");
       Alert.alert("Verification Failed", errorMsg);
     } finally {
       setLoading(false);

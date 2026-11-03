@@ -17,6 +17,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AccountShield from "../../assets/images/AccountShield.svg";
+import { clearSession } from "../services/session";
+import { invalidateSkillBridge, useSkillBridge } from "../services/useSkillBridge";
 
 function SkillBridgeShieldIllustration() {
   return (
@@ -37,6 +39,7 @@ function SkillBridgeShieldIllustration() {
 export default function SafelySignOutScreen() {
   const router = useRouter();
   const [biometricEnabled, setBiometricEnabled] = useState(true);
+  const { data, stats } = useSkillBridge();
 
   const handleSignOut = async () => {
     // If I later need to persist biometric preferences, i woulf store it here
@@ -44,8 +47,11 @@ export default function SafelySignOutScreen() {
       await AsyncStorage.setItem("quick_biometric_login", "true");
     }
 
-    // This removes active auth token, retain already_onboarded = true
-    await AsyncStorage.removeItem("user_token");
+    // Clears the token (storage + in-memory cache) and cached user/app state,
+    // keeping already_onboarded = true so the user lands on Login next time.
+    await clearSession();
+    invalidateSkillBridge();
+    router.dismissAll?.();
     router.replace("/login");
   };
 
@@ -81,8 +87,8 @@ export default function SafelySignOutScreen() {
         {/* Title & Cloud Sync Notice */}
         <Text style={styles.headline}>Safely Sign Out?</Text>
         <Text style={styles.descriptionText}>
-          Your progress on Sprint 2: SQL Capstone and your 12–day study streak
-          are securely synced to the cloud.
+          Your profile, skill analysis and roadmap progress are securely saved
+          to your account.
         </Text>
 
         {/* User Session Info Card */}
@@ -96,7 +102,7 @@ export default function SafelySignOutScreen() {
 
             <View style={styles.userInfoCol}>
               <View style={styles.userNameRow}>
-                <Text style={styles.userName}>Amaka Okafor</Text>
+                <Text style={styles.userName}>{stats.fullName || "Your account"}</Text>
                 <Ionicons
                   name="checkmark-circle"
                   size={16}
@@ -105,7 +111,7 @@ export default function SafelySignOutScreen() {
                 />
               </View>
               <Text style={styles.userSubtitle}>
-                UNILAG • B.Sc Economics & Stats
+                {data?.me?.email || data?.profile?.education || ""}
               </Text>
             </View>
           </View>
@@ -115,26 +121,28 @@ export default function SafelySignOutScreen() {
             <View style={styles.statRowItem}>
               <View style={styles.statRowLeft}>
                 <Ionicons name="chevron-forward" size={15} color="#731F94" />
-                <Text style={styles.statRowLabel}>Cloud Sandbox State</Text>
+                <Text style={styles.statRowLabel}>Skill Readiness</Text>
               </View>
-              <Text style={styles.statRowValue}>Synced 12s ago</Text>
+              <Text style={styles.statRowValue}>{stats.readiness}%</Text>
             </View>
 
             <View style={styles.statRowItem}>
               <View style={styles.statRowLeft}>
                 <Ionicons name="ribbon-outline" size={16} color="#731F94" />
-                <Text style={styles.statRowLabel}>Sprint Milestones</Text>
+                <Text style={styles.statRowLabel}>Roadmap Tasks</Text>
               </View>
-              <Text style={styles.statRowValueBold}>4 of 6 Badges</Text>
+              <Text style={styles.statRowValueBold}>
+                {stats.doneTasks} of {stats.tasks.length} Done
+              </Text>
             </View>
 
             <View style={styles.statRowItem}>
               <View style={styles.statRowLeft}>
                 <Ionicons name="flame" size={16} color="#731F94" />
-                <Text style={styles.statRowLabel}>Active Streak</Text>
+                <Text style={styles.statRowLabel}>Job Matches</Text>
               </View>
               <View style={styles.streakPill}>
-                <Text style={styles.streakPillText}>12 Days</Text>
+                <Text style={styles.streakPillText}>{data?.matches?.length || 0}</Text>
               </View>
             </View>
           </View>

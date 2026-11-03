@@ -6,49 +6,185 @@ import {
 } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { getErrorMessage } from "../services/api";
+import {
+  asList,
+  buildCvFormData,
+  cvService,
+  profileService,
+  unwrap,
+  userService,
+} from "../services/endpoints";
+import { getAppState, setCachedUser, updateAppState } from "../services/session";
+import { initials, invalidateSkillBridge, useSkillBridge } from "../services/useSkillBridge";
+
+const FIELDS = [
+  { key: "fullName", label: "Full Name", placeholder: "Your full name" },
+  { key: "phone", label: "Mobile Line", placeholder: "+234 800 000 0000", keyboardType: "phone-pad" },
+  { key: "location", label: "Location", placeholder: "e.g. Yaba, Lagos / Remote" },
+  { key: "careerGoal", label: "Career Goal", placeholder: "e.g. Junior Data Analyst" },
+  { key: "education", label: "Education", placeholder: "e.g. B.Sc Economics, UNILAG (2023)" },
+  { key: "experience", label: "Experience", placeholder: "e.g. Finance Intern – GTBank (6 months)", multiline: true },
+  { key: "bio", label: "Bio", placeholder: "A short summary about you", multiline: true },
+];
+
+const fmtSize = (bytes) => (bytes ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : "");
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+
 export default function ProfileScreen() {
   const router = useRouter();
+  const { data, stats, loading, refreshing, refresh, reload } = useSkillBridge();
 
-  const [activeCv, setActiveCv] = useState({
-    name: "Amara_Ejike_CV.pdf",
-    size: "1.2 MB",
-    parsedText: "Parsed 3 days ago",
-  });
+  const profile = data?.profile || {};
+  const me = data?.me || {};
+  const activeCv = data?.cvs?.[0] || null;
+
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [cvBusy, setCvBusy] = useState("");
+  const [history, setHistory] = useState([]);
+
+  // Seed the form from server data whenever it changes (and we're not editing)
+  useEffect(() => {
+    if (editing) return;
+    setForm({
+      fullName: me.fullName || "",
+      phone: profile.phone || "",
+      location: profile.location || "",
+      careerGoal: profile.careerGoal || "",
+      education: profile.education || "",
+      experience: profile.experience || "",
+      bio: profile.bio || "",
+    });
+  }, [data, editing]);
+
+  // CV analysis history = audit trail
+  useEffect(() => {
+    if (!activeCv?.id) {
+      setHistory([]);
+      return;
+    }
+    cvService
+      .getAnalysisHistory(activeCv.id)
+      .then((res) => setHistory(asList(res)))
+      .catch(() => setHistory([]));
+  }, [activeCv?.id]);
+
+  const completionChecks = [
+    { ok: !!me.fullName, hint: "Add your full name" },
+    { ok: !!profile.phone, hint: "Add your mobile number" },
+    { ok: !!profile.location, hint: "Add your location" },
+    { ok: !!profile.education, hint: "Add your education" },
+    { ok: !!profile.experience, hint: "Add your experience" },
+    { ok: !!profile.careerGoal, hint: "Set a career goal" },
+    { ok: !!profile.bio, hint: "Write a short bio" },
+    { ok: !!activeCv, hint: "Upload your CV" },
+  ];
+  const completion = Math.round(
+    (completionChecks.filter((c) => c.ok).length / completionChecks.length) * 100,
+  );
+  const nextHint = completionChecks.find((c) => !c.ok)?.hint;
+
+  const handleSave = async () => {
+    if (!form.fullName?.trim()) {
+      Alert.alert("Name required", "Please enter your full name.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (form.fullName.trim() !== (me.fullName || "")) {
+        const updated = unwrap(await userService.updateMe({ fullName: form.fullName.trim() }));
+        if (updated) await setCachedUser(updated);
+      }
+      const payload = {};
+      ["phone", "location", "careerGoal", "education", "experience", "bio"].forEach((k) => {
+        const v = (form[k] || "").trim();
+        if (v !== (profile[k] || "")) payload[k] = v || null;
+      });
+      if (Object.keys(payload).length) await profileService.updateMyProfile(payload);
+      invalidateSkillBridge();
+      await reload();
+      setEditing(false);
+      Alert.alert("Saved", "Your profile has been updated.");
+    } catch (err) {
+      Alert.alert("Couldn't save", getErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handlePickDocument = async () => {
+    let file;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: [
           "application/pdf",
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/msword",
         ],
         copyToCacheDirectory: true,
       });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        const file = result.assets[0];
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        setActiveCv({
-          name: file.name,
-          size: `${sizeMb} MB`,
-          parsedText: "Just updated",
-        });
-        Alert.alert("CV Updated", "AI is recalculating your skill gaps.");
-      }
+      if (result.canceled || !result.assets?.[0]) return;
+      file = result.assets[0];
     } catch (err) {
       console.log("Error picking document:", err);
+      return;
+    }
+
+    if (file.size && file.size > 5 * 1024 * 1024) {
+      Alert.alert("File too large", "Please choose a CV under 5MB.");
+      return;
+    }
+
+    try {
+      setCvBusy("Uploading CV...");
+      const formData = buildCvFormData(file);
+      const res = activeCv?.id
+        ? await cvService.updateCV(activeCv.id, formData)
+        : await cvService.uploadCV(formData);
+      const cv = unwrap(res);
+      const cvId = cv?.id || activeCv?.id;
+      await updateAppState({ cvId });
+
+      setCvBusy("Re-analysing skills...");
+      const state = await getAppState();
+      const target = profile.careerGoal || state.targetRole || stats.targetRole || undefined;
+      const analysis = unwrap(
+        await cvService.analyzeCV(cvId, {
+          targetJobTitle: target ? String(target).split(" / ")[0].slice(0, 120) : undefined,
+          careerStage: "Entry",
+          primaryGoal: "Gap Analysis",
+        }),
+      );
+      if (analysis?.skillGapId) await updateAppState({ skillGapId: analysis.skillGapId });
+
+      invalidateSkillBridge();
+      await reload();
+      Alert.alert("CV Updated", "Your skills and gaps have been recalculated.");
+    } catch (err) {
+      if (err?.response?.status === 401) return;
+      Alert.alert("CV update failed", getErrorMessage(err));
+      invalidateSkillBridge();
+      reload();
+    } finally {
+      setCvBusy("");
     }
   };
 
@@ -75,24 +211,35 @@ export default function ProfileScreen() {
         <Text style={styles.pageTitle}>Profile</Text>
       </View>
 
+      {loading && !data ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="large" color="#7A1380" />
+        </View>
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#7A1380" />
+        }
       >
         {/* ================= 1. User Info & Completion Card ================= */}
         <View style={styles.profileCard}>
           <View style={styles.profileTopRow}>
             <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>AO</Text>
+              <Text style={styles.avatarText}>{initials(me.fullName)}</Text>
             </View>
 
             <View style={styles.profileDetails}>
-              <Text style={styles.userName}>Amara Okafor</Text>
-              <Text style={styles.userEmail}>amaka.okonkwo@email.com</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location-outline" size={14} color="#5B4E5A" />
-                <Text style={styles.userLocation}>Yaba Mainland, Lagos</Text>
-              </View>
+              <Text style={styles.userName}>{me.fullName || "Your Name"}</Text>
+              <Text style={styles.userEmail}>{me.email || ""}</Text>
+              {!!profile.location && (
+                <View style={styles.locationRow}>
+                  <Ionicons name="location-outline" size={14} color="#5B4E5A" />
+                  <Text style={styles.userLocation}>{profile.location}</Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -102,78 +249,123 @@ export default function ProfileScreen() {
               <Feather name="shield" size={13} color="#1C101B" />
               <Text style={styles.completionLabelText}>Profile Completion</Text>
             </View>
-            <Text style={styles.completionPercentText}>80%</Text>
+            <Text style={styles.completionPercentText}>{completion}%</Text>
           </View>
 
           <View style={styles.progressBarTrack}>
-            <View style={[styles.progressBarFill, { width: "80%" }]} />
+            <View style={[styles.progressBarFill, { width: `${completion}%` }]} />
           </View>
 
           <View style={styles.completionPromptRow}>
-            <Feather name="plus-circle" size={12} color="#5B4E5A" />
+            <Feather name={nextHint ? "plus-circle" : "check-circle"} size={12} color="#5B4E5A" />
             <Text style={styles.completionPromptText}>
-              Add your certifications to reach 100%.
+              {nextHint ? `${nextHint} to reach 100%.` : "Your profile is complete!"}
             </Text>
           </View>
         </View>
 
-        {/* ================= 2. Communication Channels ================= */}
+        {/* ================= 2. Edit profile data ================= */}
         <View style={styles.sectionHeaderRow}>
           <View>
             <Text style={styles.sectionHeading}>Edit profile data</Text>
-            <Text style={styles.subSectionHeading}>Communication Channels</Text>
+            <Text style={styles.subSectionHeading}>
+              {editing ? "Update your details below" : "Communication Channels"}
+            </Text>
           </View>
-          <TouchableOpacity style={styles.editBtnRow} hitSlop={8}>
-            <MaterialCommunityIcons name="pencil" size={16} color="#7A1380" />
-            <Text style={styles.editText}>Edit</Text>
+          <TouchableOpacity
+            style={styles.editBtnRow}
+            hitSlop={8}
+            onPress={() => setEditing((e) => !e)}
+            disabled={saving}
+          >
+            <MaterialCommunityIcons
+              name={editing ? "close" : "pencil"}
+              size={16}
+              color="#7A1380"
+            />
+            <Text style={styles.editText}>{editing ? "Cancel" : "Edit"}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Mobile Line */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Feather name="smartphone" size={18} color="#FFFFFF" />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>Mobile Line</Text>
-              <Text style={styles.channelValue}>+234 8145 000 0000</Text>
+        {editing ? (
+          <View style={styles.editForm}>
+            {FIELDS.map((f) => (
+              <View key={f.key} style={{ marginBottom: 12 }}>
+                <Text style={styles.editLabel}>{f.label}</Text>
+                <TextInput
+                  style={[styles.editInput, f.multiline && styles.editInputMultiline]}
+                  value={form[f.key]}
+                  onChangeText={(v) => setForm((prev) => ({ ...prev, [f.key]: v }))}
+                  placeholder={f.placeholder}
+                  placeholderTextColor="#A894A6"
+                  keyboardType={f.keyboardType || "default"}
+                  multiline={!!f.multiline}
+                  editable={!saving}
+                />
+              </View>
+            ))}
+            <TouchableOpacity
+              style={styles.saveBtn}
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
+              {saving ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveBtnText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Mobile Line */}
+            <View style={styles.channelPill}>
+              <View style={styles.channelLeft}>
+                <Feather name="smartphone" size={18} color="#FFFFFF" />
+                <View style={styles.channelTextGroup}>
+                  <Text style={styles.channelTitle}>Mobile Line</Text>
+                  <Text style={styles.channelValue}>{profile.phone || "Not added"}</Text>
+                </View>
+              </View>
+              {!!profile.phone && (
+                <View style={styles.channelBadge}>
+                  <Text style={styles.channelBadgeText}>SAVED</Text>
+                </View>
+              )}
             </View>
-          </View>
-          <View style={styles.channelBadge}>
-            <Text style={styles.channelBadgeText}>VERIFIED</Text>
-          </View>
-        </View>
 
-        {/* WhatsApp Alert */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Ionicons
-              name="chatbubble-ellipses-outline"
-              size={18}
-              color="#FFFFFF"
-            />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>WhatsApp Alert</Text>
-              <Text style={styles.channelValue}>+234 8145 000 0000</Text>
+            {/* Email */}
+            <View style={styles.channelPill}>
+              <View style={styles.channelLeft}>
+                <Feather name="mail" size={18} color="#FFFFFF" />
+                <View style={styles.channelTextGroup}>
+                  <Text style={styles.channelTitle}>Email</Text>
+                  <Text style={styles.channelValue}>{me.email || "—"}</Text>
+                </View>
+              </View>
+              <View style={styles.channelBadge}>
+                <Text style={styles.channelBadgeText}>
+                  {me.isVerified ? "VERIFIED" : "PRIMARY"}
+                </Text>
+              </View>
             </View>
-          </View>
-          <View style={styles.channelBadge}>
-            <Text style={styles.channelBadgeText}>Active</Text>
-          </View>
-        </View>
 
-        {/* Target Jobs Relocation */}
-        <View style={styles.channelPill}>
-          <View style={styles.channelLeft}>
-            <Ionicons name="location-outline" size={18} color="#FFFFFF" />
-            <View style={styles.channelTextGroup}>
-              <Text style={styles.channelTitle}>Target Jobs Relocation</Text>
-              <Text style={styles.channelValue}>
-                Lagos/ Remote (NG & Global)
-              </Text>
+            {/* Location / Relocation */}
+            <View style={styles.channelPill}>
+              <View style={styles.channelLeft}>
+                <Ionicons name="location-outline" size={18} color="#FFFFFF" />
+                <View style={styles.channelTextGroup}>
+                  <Text style={styles.channelTitle}>Target Jobs Location</Text>
+                  <Text style={styles.channelValue}>{profile.location || "Not added"}</Text>
+                </View>
+              </View>
+              {!!profile.location && (
+                <Ionicons name="checkmark-circle-outline" size={20} color="#FFFFFF" />
+              )}
             </View>
-          </View>
-          <Ionicons name="checkmark-circle-outline" size={20} color="#FFFFFF" />
-        </View>
+          </>
+        )}
 
         {/* ================= 3. Education & Experience ================= */}
         <Text
@@ -186,55 +378,37 @@ export default function ProfileScreen() {
         </Text>
 
         <View style={styles.eduExpContainer}>
-          {/* Degree */}
           <View style={styles.eduItem}>
             <View style={styles.eduIconBox}>
               <Ionicons name="school-outline" size={18} color="#FFFFFF" />
             </View>
             <View style={styles.eduContent}>
-              <Text style={styles.eduInstitution}>
-                University of Lagos (UNILAG) 2019–2023
-              </Text>
-              <Text style={styles.eduDegree}>
-                B.sc Economics (Second Class Upper Honor)
-              </Text>
+              <Text style={styles.eduInstitution}>Education</Text>
+              <Text style={styles.eduDegree}>{profile.education || "Not added yet"}</Text>
             </View>
           </View>
 
           <View style={styles.eduDivider} />
 
-          {/* NYSC */}
+          <View style={styles.eduItem}>
+            <View style={styles.eduIconBox}>
+              <FontAwesome5 name="briefcase" size={16} color="#FFFFFF" />
+            </View>
+            <View style={styles.eduContent}>
+              <Text style={styles.eduInstitution}>Experience</Text>
+              <Text style={styles.eduRole}>{profile.experience || "Not added yet"}</Text>
+            </View>
+          </View>
+
+          <View style={styles.eduDivider} />
+
           <View style={styles.eduItem}>
             <View style={styles.eduIconBox}>
               <Feather name="flag" size={18} color="#FFFFFF" />
             </View>
             <View style={styles.eduContent}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.eduInstitution}>NYSC (Discharged )</Text>
-                <Text style={styles.eduBadge}>Completed</Text>
-              </View>
-              <Text style={styles.eduRole}>
-                Lagos State Ministry of Finance - Budget Analyst Assistant
-              </Text>
-              <Text style={styles.eduLocation}>Alausa, Ikeja, Lagos State</Text>
-            </View>
-          </View>
-
-          <View style={styles.eduDivider} />
-
-          {/* GTBank */}
-          <View style={styles.eduItem}>
-            <View style={styles.eduIconBox}>
-              <FontAwesome5 name="university" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.eduContent}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.eduInstitution}>GTBank Nigeria</Text>
-                <Text style={styles.eduBadge}>6 Months</Text>
-              </View>
-              <Text style={styles.eduRole}>
-                Finance Intern - Retail Operations & Reconciliations
-              </Text>
+              <Text style={styles.eduInstitution}>Career Goal</Text>
+              <Text style={styles.eduRole}>{profile.careerGoal || "Not set"}</Text>
             </View>
           </View>
         </View>
@@ -253,51 +427,63 @@ export default function ProfileScreen() {
             style={styles.outlinedUpdateBtn}
             onPress={handlePickDocument}
             activeOpacity={0.8}
+            disabled={!!cvBusy}
           >
             <MaterialCommunityIcons
               name="pencil-outline"
               size={13}
               color="#7A1380"
             />
-            <Text style={styles.outlinedUpdateText}>Update</Text>
+            <Text style={styles.outlinedUpdateText}>{activeCv ? "Update" : "Upload"}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Active CV Bar */}
-        <View style={styles.activeCvBar}>
-          <View style={styles.rowCenter}>
-            <Ionicons name="document-text-outline" size={24} color="#FFFFFF" />
-            <View style={{ marginLeft: 10 }}>
-              <Text style={styles.activeCvName}>{activeCv.name}</Text>
-              <Text style={styles.activeCvMeta}>
-                {activeCv.size} • {activeCv.parsedText}
-              </Text>
+        {activeCv && (
+          <View style={styles.activeCvBar}>
+            <View style={[styles.rowCenter, { flex: 1 }]}>
+              <Ionicons name="document-text-outline" size={24} color="#FFFFFF" />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={styles.activeCvName} numberOfLines={1}>{activeCv.fileName}</Text>
+                <Text style={styles.activeCvMeta}>
+                  {[fmtSize(activeCv.fileSize), `Uploaded ${fmtDate(activeCv.updatedAt || activeCv.createdAt)}`]
+                    .filter(Boolean)
+                    .join(" • ")}
+                </Text>
+              </View>
             </View>
           </View>
-          <TouchableOpacity hitSlop={10}>
-            <Feather name="download" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+        )}
 
         {/* Re-upload Area */}
-        <View style={styles.reuploadCard}>
-          <Feather name="upload-cloud" size={40} color="#7A1380" />
-          <Text style={styles.reuploadTitle}>
-            Tap to Replace or Re-upload CV
-          </Text>
+        <TouchableOpacity
+          style={styles.reuploadCard}
+          onPress={handlePickDocument}
+          activeOpacity={0.85}
+          disabled={!!cvBusy}
+        >
+          {cvBusy ? (
+            <>
+              <ActivityIndicator size="large" color="#7A1380" />
+              <Text style={styles.reuploadTitle}>{cvBusy}</Text>
+            </>
+          ) : (
+            <>
+              <Feather name="upload-cloud" size={40} color="#7A1380" />
+              <Text style={styles.reuploadTitle}>
+                {activeCv ? "Tap to Replace or Re-upload CV" : "Tap to Upload Your CV"}
+              </Text>
 
-          <TouchableOpacity
-            style={styles.browseButton}
-            onPress={handlePickDocument}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.browseButtonText}>Browse Files</Text>
-          </TouchableOpacity>
+              <View style={styles.browseButton}>
+                <Text style={styles.browseButtonText}>Browse Files</Text>
+              </View>
 
-          <Text style={styles.uploadFormatNotice}>
-            Supports PDF, DOCX (Max 5MB)
-          </Text>
-        </View>
+              <Text style={styles.uploadFormatNotice}>
+                Supports PDF, DOCX (Max 5MB)
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
 
         {/* Auto Gap Analysis Banner */}
         <View style={styles.gapBanner}>
@@ -309,74 +495,47 @@ export default function ProfileScreen() {
           />
           <Text style={styles.gapBannerText}>
             <Text style={{ fontWeight: "800" }}>Auto Gap Analysis: </Text>
-            Updating your CV triggers an instant skill-recalculation across
-            Lagos Tech & Remote Finance roles.
+            Updating your CV re-runs the AI skill-gap analysis for your target role.
           </Text>
         </View>
 
         {/* ================= 5. Resume Audit Trail ================= */}
-        <Text
-          style={[
-            styles.sectionHeaderSmall,
-            { marginTop: 24, marginBottom: 10 },
-          ]}
-        >
-          RESUME AUDIT TRAIL
-        </Text>
+        {history.length > 0 && (
+          <>
+            <Text
+              style={[
+                styles.sectionHeaderSmall,
+                { marginTop: 24, marginBottom: 10 },
+              ]}
+            >
+              ANALYSIS HISTORY
+            </Text>
 
-        <View style={styles.auditCard}>
-          {/* v2.1 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineLine} />
+            <View style={styles.auditCard}>
+              {history.slice(0, 5).map((h, idx, arr) => (
+                <View key={h.id} style={styles.auditRow}>
+                  <View style={styles.timelineCol}>
+                    <View style={styles.timelineDot} />
+                    {idx < arr.length - 1 && <View style={styles.timelineLine} />}
+                  </View>
+                  <View style={styles.auditDetails}>
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.auditVersion}>
+                        {idx === 0 ? "Latest" : `Analysis ${arr.length - idx}`}
+                      </Text>
+                      <Text style={styles.auditDate}>{fmtDate(h.createdAt)}</Text>
+                    </View>
+                    <Text style={styles.auditDescription}>
+                      {h.primaryGoal || "Gap Analysis"}
+                      {h.targetJobTitle ? ` for ${h.targetJobTitle}` : ""}
+                      {h.careerStage ? ` • ${h.careerStage}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              ))}
             </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v2.1 (Active)</Text>
-                <Text style={styles.auditDate}>Oct 18</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                Appended Lagos Ministry NYSC discharge certificate & SQL Data
-                track.
-              </Text>
-            </View>
-          </View>
-
-          {/* v2.0 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineLine} />
-            </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v2.0</Text>
-                <Text style={styles.auditDate}>Aug 04</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                UNILAG graduation credential added + GTBank finance internship
-                portfolio.
-              </Text>
-            </View>
-          </View>
-
-          {/* v1.0 */}
-          <View style={styles.auditRow}>
-            <View style={styles.timelineCol}>
-              <View style={styles.timelineDot} />
-            </View>
-            <View style={styles.auditDetails}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.auditVersion}>v1.0</Text>
-                <Text style={styles.auditDate}>Jun 12</Text>
-              </View>
-              <Text style={styles.auditDescription}>
-                Initial scanner profile ingest.
-              </Text>
-            </View>
-          </View>
-        </View>
+          </>
+        )}
 
         {/* ================= 6. Membership & Credits ================= */}
         <View
@@ -515,11 +674,53 @@ export default function ProfileScreen() {
           <Feather name="chevron-right" size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  editForm: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.2,
+    borderColor: "#E4CFE2",
+    borderRadius: 14,
+    padding: 14,
+  },
+  editLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1C101B",
+    marginBottom: 6,
+  },
+  editInput: {
+    minHeight: 44,
+    borderWidth: 1.2,
+    borderColor: "#7A1380",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1C101B",
+    backgroundColor: "#FFFFFF",
+  },
+  editInputMultiline: {
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  saveBtn: {
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#7A1380",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  saveBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FFFFFF",

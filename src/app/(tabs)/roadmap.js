@@ -5,10 +5,13 @@ import {
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
+  Linking,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -19,20 +22,205 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import LogoSvg from "../../../assets/images/logo.svg"; // Points to your downloaded logo SVG asset
+import { EmptyCard, LoadingState } from "../../components/StateViews";
+import { getErrorMessage } from "../../services/api";
+import { getAppState, updateAppState } from "../../services/session";
+import { cycleTaskStatus, generateRoadmap } from "../../services/skillActions";
+import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
 
 const COACH_AVATAR = require("../../../assets/images/TundeAlabi.png"); // Points to your downloaded coach image asset
 
+const PHASES = [
+  { key: "30", month: 1, days: "DAYS 1–30", name: "Foundations" },
+  { key: "60", month: 2, days: "DAYS 31–60", name: "Projects" },
+  { key: "90", month: 3, days: "DAYS 61–90", name: "Job Ready" },
+];
+
+const TYPE_LABEL = { learn: "Learn", project: "Project", practice: "Practice", apply: "Apply" };
+
 export default function RoadmapScreen() {
   const router = useRouter();
+  const { data, stats, loading, refreshing, refresh, reload } = useSkillBridge();
   const [selectedMonthTab, setSelectedMonthTab] = useState(1);
+  const [generating, setGenerating] = useState(false);
+  const [updatingTask, setUpdatingTask] = useState(null);
+  const [localPlan, setLocalPlan] = useState({ planned: [], done: [] });
 
-  // 88% Role Match Circular Ring
+  const roadmap = data?.activeRoadmap;
+  const tbp = roadmap?.tasksByPhase || {};
+  const hasTasks = stats.tasks.length > 0;
+
+  // Local fallback plan (used while AI roadmap generation is unavailable)
+  useEffect(() => {
+    getAppState().then((s) =>
+      setLocalPlan({ planned: s.plannedSkills || [], done: s.localDoneSkills || [] }),
+    );
+  }, [data]);
+  const localSkills = [
+    ...new Set([...(stats.missingSkills || []).map((s) => s.toLowerCase()), ...localPlan.planned]),
+  ];
+
+  // Which phase is "current": first phase with unfinished tasks.
+  const currentPhaseIdx = Math.max(
+    0,
+    PHASES.findIndex((p) => (tbp[p.key] || []).some((t) => t.status !== "done")),
+  );
+
+  useEffect(() => {
+    if (hasTasks) setSelectedMonthTab(currentPhaseIdx + 1);
+  }, [hasTasks, currentPhaseIdx]);
+
+  const phase = PHASES[selectedMonthTab - 1];
+  const phaseTasks = [...(tbp[phase.key] || [])].sort((a, b) => (a.position || 0) - (b.position || 0));
+  const phaseDone = phaseTasks.filter((t) => t.status === "done").length;
+
+  // Gauge
   const circleSize = 52;
   const strokeWidth = 4.5;
   const radius = (circleSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const matchValue = 0.88;
-  const strokeDashoffset = circumference - circumference * matchValue;
+  const matchPct = stats.topMatch?.matchPercentage ?? stats.readiness;
+  const strokeDashoffset = circumference - circumference * (matchPct / 100);
+
+  const remaining = stats.tasks.length - stats.doneTasks;
+  const coachQuote = hasTasks
+    ? remaining === 0
+      ? '"Roadmap complete — time to apply!"'
+      : `"You're ${remaining} task${remaining > 1 ? "s" : ""} away!"`
+    : stats.missingSkills.length
+      ? `"Close ${stats.missingSkills.length} gap${stats.missingSkills.length > 1 ? "s" : ""} to be job-ready."`
+      : '"Let\'s build your plan."';
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      await generateRoadmap(data?.latestGap?.id);
+      await reload();
+      Alert.alert("Roadmap ready", "Your personalised 90-day roadmap has been generated.");
+    } catch (err) {
+      Alert.alert("Roadmap", getErrorMessage(err));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleTaskPress = async (task) => {
+    if (!roadmap?.id) return;
+    setUpdatingTask(task.id);
+    try {
+      await cycleTaskStatus(roadmap.id, task);
+      await reload();
+    } catch (err) {
+      Alert.alert("Couldn't update task", getErrorMessage(err));
+    } finally {
+      setUpdatingTask(null);
+    }
+  };
+
+  const toggleLocalSkill = async (skill) => {
+    const done = new Set(localPlan.done);
+    done.has(skill) ? done.delete(skill) : done.add(skill);
+    const next = [...done];
+    setLocalPlan((p) => ({ ...p, done: next }));
+    await updateAppState({ localDoneSkills: next });
+  };
+
+  const openResource = (url) => {
+    if (!url) return;
+    Linking.openURL(url).catch(() => Alert.alert("Couldn't open link", url));
+  };
+
+  const renderTask = (task) => {
+    const isDone = task.status === "done";
+    const isActive = task.status === "in_progress";
+    const busy = updatingTask === task.id;
+    const statusBtnLabel = isDone ? "Mark as To-do" : isActive ? "Mark Complete" : "Start Task";
+
+    const body = (
+      <>
+        <View style={styles.weekTopRow}>
+          {isDone ? (
+            <View style={styles.verifiedCheckWrap}>
+              <Ionicons name="checkmark" size={14} color="#0D8A58" />
+            </View>
+          ) : isActive ? (
+            <View style={styles.activePlayWrap}>
+              <Ionicons name="play" size={13} color="#731F94" />
+            </View>
+          ) : (
+            <View style={styles.clockIconWrap}>
+              <Ionicons name="time-outline" size={15} color="#731F94" />
+            </View>
+          )}
+          <Text style={isActive ? styles.weekActiveLabel : styles.weekNumberText}>
+            {(TYPE_LABEL[task.taskType] || "Task").toUpperCase()}
+            {task.estimatedHours ? ` • ${task.estimatedHours}H` : ""}
+            {isActive ? " • ACTIVE NOW" : ""}
+          </Text>
+          {isDone && (
+            <View style={styles.verifiedBadge}>
+              <Ionicons name="ribbon-outline" size={11} color="#0D8A58" />
+              <Text style={styles.verifiedBadgeText}>Completed</Text>
+            </View>
+          )}
+        </View>
+
+        <Text style={styles.moduleTitle}>{task.title}</Text>
+        {!!task.description && (
+          <Text style={styles.moduleDescription}>{task.description}</Text>
+        )}
+
+        <View style={styles.actionBtnRow}>
+          <TouchableOpacity
+            style={[styles.resumeBtn, isDone && styles.resumeBtnMuted]}
+            activeOpacity={0.88}
+            disabled={busy}
+            onPress={() => handleTaskPress(task)}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons
+                  name={isDone ? "refresh" : isActive ? "checkmark-done" : "play"}
+                  size={16}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.resumeBtnText}>{statusBtnLabel}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {!!task.resourceUrl && (
+            <TouchableOpacity
+              style={styles.helpCircleBtn}
+              hitSlop={10}
+              onPress={() => openResource(task.resourceUrl)}
+            >
+              <Feather name="external-link" size={18} color="#731F94" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </>
+    );
+
+    if (isActive) {
+      return (
+        <View key={task.id} style={styles.currentSprintBorderWrap}>
+          <View style={styles.currentSprintTag}>
+            <View style={styles.whiteTinyDot} />
+            <Text style={styles.currentSprintTagText}>CURRENT SPRINT</Text>
+          </View>
+          {body}
+        </View>
+      );
+    }
+    return (
+      <View key={task.id} style={styles.card}>
+        {body}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -62,9 +250,15 @@ export default function RoadmapScreen() {
         </View>
       </View>
 
+      {loading && !data ? (
+        <LoadingState label="Loading your roadmap..." />
+      ) : (
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#731F94" />
+        }
       >
         {/* ================= 1. Calibrated Target Track Card ================= */}
         <View style={styles.targetCard}>
@@ -73,11 +267,11 @@ export default function RoadmapScreen() {
               <View style={styles.calibratedPill}>
                 <Ionicons name="star" size={11} color="#731F94" />
                 <Text style={styles.calibratedPillText}>
-                  TARGET TRACK CALIBRATED
+                  {hasTasks ? "TARGET TRACK CALIBRATED" : "TARGET TRACK"}
                 </Text>
               </View>
               <Text style={styles.targetRoleText}>
-                Junior Fintech Data Analyst
+                {roadmap?.targetRole ? titleCase(roadmap.targetRole) : stats.targetRole || "Set a target role"}
               </Text>
             </View>
 
@@ -107,10 +301,12 @@ export default function RoadmapScreen() {
                   />
                 </Svg>
                 <View style={styles.gaugeInnerLabel}>
-                  <Text style={styles.gaugePercentText}>88%</Text>
+                  <Text style={styles.gaugePercentText}>{matchPct}%</Text>
                 </View>
               </View>
-              <Text style={styles.roleMatchLabel}>ROLE MATCH</Text>
+              <Text style={styles.roleMatchLabel}>
+                {stats.topMatch ? "ROLE MATCH" : "READINESS"}
+              </Text>
             </View>
           </View>
 
@@ -132,53 +328,128 @@ export default function RoadmapScreen() {
                   <Text style={styles.aiLeadText}>AI Lead</Text>
                 </View>
               </View>
-              <Text style={styles.coachQuote}>"You're 2 modules away!"</Text>
+              <Text style={styles.coachQuote}>{coachQuote}</Text>
             </View>
 
             <TouchableOpacity
               style={styles.askBtn}
-              onPress={() =>
-                Alert.alert("Coach Tade", "Opening AI study coach chat...")
-              }
+              onPress={() => router.push("/(tabs)/learn")}
               activeOpacity={0.8}
             >
               <Ionicons name="chatbubble-outline" size={13} color="#731F94" />
-              <Text style={styles.askBtnText}>Ask</Text>
+              <Text style={styles.askBtnText}>Learn</Text>
             </TouchableOpacity>
           </View>
         </View>
 
+        {!roadmap ? (
+          <>
+            <EmptyCard
+              icon="map"
+              title="Generate your 90-day roadmap"
+              message={
+                data?.latestGap
+                  ? "We'll turn your skill gaps into a 30/60/90-day plan of tasks and projects."
+                  : "Complete your skill-gap analysis first so we know what to plan for."
+              }
+              ctaLabel={generating ? "Generating..." : data?.latestGap ? "Generate Roadmap" : "Start Analysis"}
+              onPress={
+                generating
+                  ? undefined
+                  : data?.latestGap
+                    ? handleGenerate
+                    : () => router.push("/profile-setup")
+              }
+            />
+
+            {localSkills.length > 0 && (
+              <>
+                <View style={styles.curriculumSectionHeader}>
+                  <Text style={styles.curriculumTitle}>Your Skill Plan</Text>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <View style={styles.inProgressPill}>
+                      <Text style={styles.inProgressText}>
+                        {localPlan.done.filter((d) => localSkills.includes(d)).length}/{localSkills.length} done
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                {localSkills.map((skill) => {
+                  const done = localPlan.done.includes(skill);
+                  return (
+                    <TouchableOpacity
+                      key={skill}
+                      style={styles.card}
+                      activeOpacity={0.85}
+                      onPress={() => toggleLocalSkill(skill)}
+                    >
+                      <View style={styles.weekTopRow}>
+                        {done ? (
+                          <View style={styles.verifiedCheckWrap}>
+                            <Ionicons name="checkmark" size={14} color="#0D8A58" />
+                          </View>
+                        ) : (
+                          <View style={styles.clockIconWrap}>
+                            <Ionicons name="time-outline" size={15} color="#731F94" />
+                          </View>
+                        )}
+                        <Text style={styles.weekNumberText}>SKILL GAP</Text>
+                      </View>
+                      <Text style={styles.moduleTitle}>Learn {titleCase(skill)}</Text>
+                      <Text style={styles.moduleDescription}>
+                        {done ? "Marked as learned — tap to undo." : "Tap when you've learned this skill."}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </>
+        ) : (
+          <>
         {/* ================= 2. Pace Tracker Card ================= */}
         <View style={styles.card}>
           <Text style={styles.paceOverline}>PACE TRACKER</Text>
           <View style={styles.paceHeaderRow}>
-            <Text style={styles.paceDaysText}>Day 14 of 60</Text>
+            <Text style={styles.paceDaysText}>Day {stats.dayNumber} of 90</Text>
             <View style={styles.sprintPill}>
-              <Text style={styles.sprintPillText}>Sprint 2 of 8</Text>
+              <Text style={styles.sprintPillText}>Phase {currentPhaseIdx + 1} of 3</Text>
             </View>
-            <Text style={styles.pacePercentText}>38%</Text>
+            <Text style={styles.pacePercentText}>{stats.taskPct}%</Text>
           </View>
 
           {/* 3-Segment Timeline Progress Bar */}
           <View style={styles.segmentedProgressBar}>
-            <View style={[styles.barSegment, styles.segmentActive]} />
-            <View style={[styles.barSegment, styles.segmentMid]} />
-            <View style={[styles.barSegment, styles.segmentInactive]} />
+            {PHASES.map((p, i) => (
+              <View
+                key={p.key}
+                style={[
+                  styles.barSegment,
+                  i < currentPhaseIdx
+                    ? styles.segmentActive
+                    : i === currentPhaseIdx
+                      ? styles.segmentMid
+                      : styles.segmentInactive,
+                ]}
+              />
+            ))}
           </View>
 
           <View style={styles.segmentLabelsRow}>
-            <View style={styles.activeLabelDotWrap}>
-              <View style={styles.purpleTinyDot} />
-              <Text style={styles.segmentLabelActive}>
-                Month 1: SQL{"\n"}Foundations
-              </Text>
-            </View>
-            <Text style={styles.segmentLabelInactive}>
-              Month 2:{"\n"}Capstones
-            </Text>
-            <Text style={styles.segmentLabelInactive}>
-              Month 3: Recruiter{"\n"}Pipeline
-            </Text>
+            {PHASES.map((p, i) =>
+              i === currentPhaseIdx ? (
+                <View key={p.key} style={styles.activeLabelDotWrap}>
+                  <View style={styles.purpleTinyDot} />
+                  <Text style={styles.segmentLabelActive}>
+                    Month {p.month}:{"\n"}{p.name}
+                  </Text>
+                </View>
+              ) : (
+                <Text key={p.key} style={styles.segmentLabelInactive}>
+                  Month {p.month}:{"\n"}{p.name}
+                </Text>
+              ),
+            )}
           </View>
         </View>
 
@@ -188,273 +459,67 @@ export default function RoadmapScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.monthTabsRow}
         >
-          <TouchableOpacity
-            style={[
-              styles.monthTab,
-              selectedMonthTab === 1
-                ? styles.monthTabActive
-                : styles.monthTabInactive,
-            ]}
-            onPress={() => setSelectedMonthTab(1)}
-            activeOpacity={0.85}
-          >
-            <View
-              style={
-                selectedMonthTab === 1
-                  ? styles.monthNumberBoxActive
-                  : styles.monthNumberBoxInactive
-              }
-            >
-              <Text
-                style={
-                  selectedMonthTab === 1
-                    ? styles.monthNumberTextActive
-                    : styles.monthNumberTextInactive
-                }
+          {PHASES.map((p) => {
+            const active = selectedMonthTab === p.month;
+            const count = (tbp[p.key] || []).length;
+            return (
+              <TouchableOpacity
+                key={p.key}
+                style={[
+                  styles.monthTab,
+                  active ? styles.monthTabActive : styles.monthTabInactive,
+                ]}
+                onPress={() => setSelectedMonthTab(p.month)}
+                activeOpacity={0.85}
               >
-                1
-              </Text>
-            </View>
-            <View>
-              <Text
-                style={
-                  selectedMonthTab === 1
-                    ? styles.monthDaysLabelActive
-                    : styles.monthDaysLabelInactive
-                }
-              >
-                DAYS 1–30 •
-              </Text>
-              <Text
-                style={
-                  selectedMonthTab === 1
-                    ? styles.monthTabTitleActive
-                    : styles.monthTabTitleInactive
-                }
-              >
-                Month 1: SQL Core
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.monthTab,
-              selectedMonthTab === 2
-                ? styles.monthTabActive
-                : styles.monthTabInactive,
-            ]}
-            onPress={() => setSelectedMonthTab(2)}
-            activeOpacity={0.85}
-          >
-            <View
-              style={
-                selectedMonthTab === 2
-                  ? styles.monthNumberBoxActive
-                  : styles.monthNumberBoxInactive
-              }
-            >
-              <Text
-                style={
-                  selectedMonthTab === 2
-                    ? styles.monthNumberTextActive
-                    : styles.monthNumberTextInactive
-                }
-              >
-                2
-              </Text>
-            </View>
-            <View>
-              <Text
-                style={
-                  selectedMonthTab === 2
-                    ? styles.monthDaysLabelActive
-                    : styles.monthDaysLabelInactive
-                }
-              >
-                DAYS 31–60
-              </Text>
-              <Text
-                style={
-                  selectedMonthTab === 2
-                    ? styles.monthTabTitleActive
-                    : styles.monthTabTitleInactive
-                }
-              >
-                Month 2: Capstones
-              </Text>
-            </View>
-          </TouchableOpacity>
+                <View style={active ? styles.monthNumberBoxActive : styles.monthNumberBoxInactive}>
+                  <Text style={active ? styles.monthNumberTextActive : styles.monthNumberTextInactive}>
+                    {p.month}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={active ? styles.monthDaysLabelActive : styles.monthDaysLabelInactive}>
+                    {p.days} • {count} task{count === 1 ? "" : "s"}
+                  </Text>
+                  <Text style={active ? styles.monthTabTitleActive : styles.monthTabTitleInactive}>
+                    Month {p.month}: {p.name}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
-        {/* ================= 4. Month 1: Production SQL Curriculum ================= */}
+        {/* ================= 4. Selected phase curriculum ================= */}
         <View style={styles.curriculumSectionHeader}>
           <Text style={styles.curriculumTitle}>
-            Month 1: Production{"\n"}SQL
+            Month {phase.month}:{"\n"}{phase.name}
           </Text>
           <View style={{ alignItems: "flex-end" }}>
             <View style={styles.inProgressPill}>
-              <Text style={styles.inProgressText}>In Progress</Text>
-            </View>
-            <Text style={styles.durationSubText}>4 Weeks</Text>
-          </View>
-        </View>
-
-        {/* Week 1 (Done) */}
-        <View style={styles.card}>
-          <View style={styles.weekTopRow}>
-            <View style={styles.verifiedCheckWrap}>
-              <Ionicons name="checkmark" size={14} color="#0D8A58" />
-            </View>
-            <Text style={styles.weekNumberText}>WEEK 1</Text>
-            <View style={styles.verifiedBadge}>
-              <Ionicons name="ribbon-outline" size={11} color="#0D8A58" />
-              <Text style={styles.verifiedBadgeText}>
-                Verified Badge Earned
+              <Text style={styles.inProgressText}>
+                {phaseTasks.length === 0
+                  ? "Empty"
+                  : phaseDone === phaseTasks.length
+                    ? "Completed"
+                    : selectedMonthTab - 1 === currentPhaseIdx
+                      ? "In Progress"
+                      : "Upcoming"}
               </Text>
             </View>
+            <Text style={styles.durationSubText}>
+              {phaseDone}/{phaseTasks.length} done
+            </Text>
           </View>
+        </View>
 
-          <Text style={styles.moduleTitle}>
-            PostgreSQL Architecture & Relational Modeling
-          </Text>
+        {phaseTasks.length === 0 ? (
           <Text style={styles.moduleDescription}>
-            Normal forms, indexing structures, ledger table constraints, and
-            ACID guarantees for fintech databases.
+            No tasks in this phase yet. Add gaps from the Skill Gap tab.
           </Text>
-        </View>
-
-        {/* Week 2 (Current Active Sprint) */}
-        <View style={styles.currentSprintBorderWrap}>
-          <View style={styles.currentSprintTag}>
-            <View style={styles.whiteTinyDot} />
-            <Text style={styles.currentSprintTagText}>CURRENT SPRINT</Text>
-          </View>
-
-          <View style={styles.weekTopRow}>
-            <View style={styles.activePlayWrap}>
-              <Ionicons name="play" size={13} color="#731F94" />
-            </View>
-            <Text style={styles.weekActiveLabel}>WEEK 2 • ACTIVE NOW</Text>
-          </View>
-
-          <Text style={styles.moduleTitle}>
-            Complex Queries, CTEs & Window Functions
-          </Text>
-          <Text style={styles.moduleDescription}>
-            Running totals, lead/lag sessionization, cohort partitioning, and
-            Flutterwave merchant daily settlement scripts.
-          </Text>
-
-          {/* Mini Sprint Progress Box */}
-          <View style={styles.sprintProgressCard}>
-            <View style={styles.sprintProgressHeader}>
-              <View style={styles.sprintProgressLabelRow}>
-                <MaterialCommunityIcons
-                  name="chart-box-outline"
-                  size={15}
-                  color="#731F94"
-                />
-                <Text style={styles.sprintProgressHeading}>
-                  Sprint Completion
-                </Text>
-              </View>
-              <Text style={styles.sprintProgressStat}>
-                70% finished (2 left)
-              </Text>
-            </View>
-
-            <View style={styles.sprintBarTrack}>
-              <View style={[styles.sprintBarFill, { width: "70%" }]} />
-            </View>
-
-            <View style={styles.sprintFooterRow}>
-              <Text style={styles.nextTopicText}>
-                Next: Multi-stage CTE Optimizations
-              </Text>
-              <Text style={styles.estTimeText}>Est. 45 mins</Text>
-            </View>
-          </View>
-
-          {/* Resume Action Buttons */}
-          <View style={styles.actionBtnRow}>
-            <TouchableOpacity
-              style={styles.resumeBtn}
-              activeOpacity={0.88}
-              onPress={() =>
-                Alert.alert(
-                  "SQL Sandbox",
-                  "Launching live PostgreSQL sandbox session...",
-                )
-              }
-            >
-              <Ionicons name="terminal" size={16} color="#FFFFFF" />
-              <Text style={styles.resumeBtnText}>Resume SQL Sandbox</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.helpCircleBtn} hitSlop={10}>
-              <Feather name="help-circle" size={18} color="#731F94" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Week 3 (Locked) */}
-        <View style={styles.card}>
-          <View style={styles.weekTopRow}>
-            <View style={styles.clockIconWrap}>
-              <Ionicons name="time-outline" size={15} color="#731F94" />
-            </View>
-            <Text style={styles.weekNumberText}>WEEK 3</Text>
-            <View style={styles.unlocksBadge}>
-              <Feather name="lock" size={10} color="#556070" />
-              <Text style={styles.unlocksBadgeText}>Unlocks in 3 days</Text>
-            </View>
-          </View>
-
-          <Text style={styles.moduleTitle}>
-            Cohort Retention & Churn Modeling
-          </Text>
-          <Text style={styles.moduleDescription}>
-            Build quarterly active user (QAU) retention curves and identify
-            high-value customer drop-off inflection points.
-          </Text>
-        </View>
-
-        {/* Month 1 Capstone Card */}
-        <View style={styles.capstoneCard}>
-          <View style={styles.capstoneHeaderRow}>
-            <View style={styles.capstoneBadge}>
-              <Text style={styles.capstoneBadgeText}>MONTH 1 CAPSTONE</Text>
-            </View>
-            <View style={styles.busIconWrap}>
-              <MaterialCommunityIcons name="bus" size={20} color="#731F94" />
-            </View>
-          </View>
-
-          <Text style={styles.capstoneTitle}>
-            Lagos Commute BRT Fare Anomaly Detection
-          </Text>
-          <Text style={styles.capstoneDescription}>
-            Audit 1.2M automated terminal transactions across Ikorodu and CMS
-            routes to flag card-cloning fraud.
-          </Text>
-
-          <View style={styles.capstoneFooterRow}>
-            <View style={styles.capstoneChipsGroup}>
-              <View style={styles.techPill}>
-                <Text style={styles.techPillText}>PostgreSQL</Text>
-              </View>
-              <View style={styles.techPill}>
-                <Text style={styles.techPillText}>Supabase</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.rubricBtn}>
-              <Text style={styles.rubricBtnText}>Preview Rubric</Text>
-              <Feather name="chevron-right" size={13} color="#731F94" />
-            </TouchableOpacity>
-          </View>
-        </View>
+        ) : (
+          phaseTasks.map(renderTask)
+        )}
 
         {/* ================= 5. Upcoming Milestones ================= */}
         <View style={styles.upcomingHeaderRow}>
@@ -462,101 +527,58 @@ export default function RoadmapScreen() {
           <Text style={styles.visionText}>Full 90–Day Vision</Text>
         </View>
 
-        {/* Month 2 Milestone Preview */}
-        <View style={styles.card}>
-          <View style={styles.milestoneTopRow}>
-            <View style={styles.milestoneIconSquare}>
-              <FontAwesome5 name="university" size={14} color="#731F94" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.milestonePeriodText}>
-                MONTH 2 (DAYS 31–60)
+        {PHASES.filter((p) => p.month > currentPhaseIdx + 1).map((p) => {
+          const tasks = tbp[p.key] || [];
+          const skills = [...new Set(tasks.map((t) => t.skill).filter(Boolean))].slice(0, 3);
+          return (
+            <TouchableOpacity
+              key={p.key}
+              style={styles.card}
+              activeOpacity={0.85}
+              onPress={() => setSelectedMonthTab(p.month)}
+            >
+              <View style={styles.milestoneTopRow}>
+                <View style={styles.milestoneIconSquare}>
+                  {p.month === 2 ? (
+                    <FontAwesome5 name="university" size={14} color="#731F94" />
+                  ) : (
+                    <MaterialCommunityIcons name="handshake-outline" size={18} color="#731F94" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.milestonePeriodText}>
+                    MONTH {p.month} ({p.days})
+                  </Text>
+                </View>
+                <View style={styles.lockedPreviewBadge}>
+                  <Feather name="lock" size={10} color="#556070" />
+                  <Text style={styles.lockedPreviewText}>{tasks.length} tasks</Text>
+                </View>
+              </View>
+
+              <Text style={styles.milestoneHeadingText}>
+                {tasks[0]?.title || `Month ${p.month}: ${p.name}`}
               </Text>
-            </View>
-            <View style={styles.lockedPreviewBadge}>
-              <Feather name="lock" size={10} color="#556070" />
-              <Text style={styles.lockedPreviewText}>Locked Preview</Text>
-            </View>
-          </View>
+              {tasks.length > 1 && (
+                <Text style={styles.milestoneBodyText}>
+                  + {tasks.length - 1} more task{tasks.length > 2 ? "s" : ""}
+                </Text>
+              )}
 
-          <Text style={styles.milestoneHeadingText}>
-            Fintech Production Capstone & API Integration
-          </Text>
-          <Text style={styles.milestoneBodyText}>
-            Microservice ledger auditing, real-time Streamlit interactive fraud
-            investigation dashboard, and Airflow orchestrations.
-          </Text>
-
-          <View style={styles.miniChipsRow}>
-            <View style={styles.miniTechPill}>
-              <Text style={styles.miniTechText}>Streamlit</Text>
-            </View>
-            <View style={styles.miniTechPill}>
-              <Text style={styles.miniTechText}>Apache Airflow</Text>
-            </View>
-            <View style={styles.miniTechPill}>
-              <Text style={styles.miniTechText}>FastAPI</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Month 3 Milestone Preview */}
-        <View style={styles.card}>
-          <View style={styles.milestoneTopRow}>
-            <View style={styles.milestoneIconSquare}>
-              <MaterialCommunityIcons
-                name="handshake-outline"
-                size={18}
-                color="#731F94"
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.milestonePeriodText}>
-                MONTH 3 (DAYS 61–90)
-              </Text>
-            </View>
-            <View style={styles.fastTrackBadge}>
-              <Text style={styles.fastTrackText}>Fast–Track</Text>
-            </View>
-          </View>
-
-          <Text style={styles.milestoneHeadingText}>
-            Recruiter Fast–Track & Technical Interviews
-          </Text>
-
-          <View style={styles.hiringBannerBox}>
-            <FontAwesome5 name="users" size={14} color="#731F94" />
-            <Text style={styles.hiringBannerLabel}>Hiring Partners Ready</Text>
-            <Text style={styles.guaranteedBadge}>Guaranteed Review</Text>
-          </View>
-        </View>
-
-        {/* ================= 6. Cohort Office Hours Card ================= */}
-        <View style={styles.officeHoursCard}>
-          <View style={styles.officeHoursIconBox}>
-            <MaterialCommunityIcons
-              name="calendar-check"
-              size={20}
-              color="#FFFFFF"
-            />
-          </View>
-
-          <View style={styles.officeHoursInfo}>
-            <Text style={styles.officeHoursTitle}>Cohort Office Hours</Text>
-            <Text style={styles.officeHoursSubtitle}>
-              7:00 PM (WAT) with Lead Engineer Bimbo
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.joinRoomBtn}
-            onPress={() =>
-              Alert.alert("Cohort Live Room", "Joining video call room...")
-            }
-          >
-            <Text style={styles.joinRoomText}>Join Room</Text>
-          </TouchableOpacity>
-        </View>
+              {skills.length > 0 && (
+                <View style={styles.miniChipsRow}>
+                  {skills.map((s) => (
+                    <View key={s} style={styles.miniTechPill}>
+                      <Text style={styles.miniTechText}>{titleCase(s)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+          </>
+        )}
 
         {/* ================= 7. Bottom Workspace CTA ================= */}
         <TouchableOpacity
@@ -564,15 +586,19 @@ export default function RoadmapScreen() {
           activeOpacity={0.88}
           onPress={() => router.push("/(tabs)/learn")}
         >
-          <Text style={styles.workspaceBtnText}>View Project Workspace</Text>
+          <Text style={styles.workspaceBtnText}>View Learning Resources</Text>
           <Feather name="arrow-right" size={18} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  resumeBtnMuted: {
+    backgroundColor: "#A396A6",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF8FC",

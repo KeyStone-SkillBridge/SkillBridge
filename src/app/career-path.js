@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,43 +8,109 @@ import {
   ScrollView,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import {
+  asList,
+  matchingService,
+  opportunityService,
+  profileService,
+} from "../services/endpoints";
+import { getAppState, updateAppState } from "../services/session";
+import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
 
-const INITIAL_PATHS = [
-  {
-    id: "1",
-    title: "Junior Data Analyst, 87%",
-    company: "TechCorp, Lagos",
-    bullets: [
-      "Strong Excel and reporting skills",
-      "Research Assistant experience (8 months)",
-    ],
-    selected: true,
-  },
-  {
-    id: "2",
-    title: "Operations Analyst",
-    company: "Example Ltd, Lagos",
-    bullets: [
-      "Project coordination from your volunteer work",
-      "Clear reporting and communication",
-    ],
-    selected: true,
-  },
-];
+const toPath = (match) => {
+  const opp = match.opportunity || match;
+  const pct = match.matchPercentage;
+  const place = [opp.company, opp.location || (opp.workMode ? titleCase(opp.workMode) : null)]
+    .filter(Boolean)
+    .join(", ");
+  const bullets = [];
+  if (match.matchedSkills?.length)
+    bullets.push(`Matches your skills: ${match.matchedSkills.slice(0, 4).map(titleCase).join(", ")}`);
+  if (match.missingSkills?.length)
+    bullets.push(`Skills to build: ${match.missingSkills.slice(0, 3).map(titleCase).join(", ")}`);
+  if (!bullets.length && match.explanation) bullets.push(match.explanation);
+  if (!bullets.length && opp.requiredSkills?.length)
+    bullets.push(`Requires: ${opp.requiredSkills.slice(0, 4).map(titleCase).join(", ")}`);
+  return {
+    id: String(match.id || opp.id),
+    opportunityId: opp.id,
+    title: typeof pct === "number" ? `${opp.title}, ${pct}%` : opp.title,
+    company: place || "Open opportunity",
+    bullets: bullets.length ? bullets : ["Recommended for your target role"],
+    selected: false,
+  };
+};
 
 export default function CareerPathScreen() {
   const router = useRouter();
 
-  const [careerPaths, setCareerPaths] = useState(INITIAL_PATHS);
+  const [careerPaths, setCareerPaths] = useState([]);
+  const [loadingPaths, setLoadingPaths] = useState(true);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCompany, setNewCompany] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const state = await getAppState();
+      const target = state.targetRole || "";
+      let paths = [];
+
+      // 1) Real career matches (needs a completed skill-gap analysis)
+      try {
+        const matches = asList(await matchingService.generate());
+        paths = matches.slice(0, 5).map(toPath);
+      } catch (e) {
+        if (e?.response?.status === 401) return;
+        console.log("Matching notice:", e?.response?.data || e?.message);
+      }
+
+      // 2) Fallback: search active opportunities for the target role
+      if (paths.length === 0 && target) {
+        try {
+          const opps = asList(
+            await opportunityService.list({ q: target, status: "active", limit: 5 }),
+          );
+          paths = opps.map((o) => toPath(o));
+          if (paths.length) setNotice("Based on open roles for your target. Upload a CV to get match scores.");
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 3) Always offer the user's own target role
+      if (target && !paths.some((p) => p.title.toLowerCase().startsWith(target.toLowerCase()))) {
+        paths.push({
+          id: "target-role",
+          title: titleCase(target),
+          company: "Your target role",
+          bullets: (state.confirmedSkills || []).length
+            ? [`Building on: ${state.confirmedSkills.slice(0, 4).join(", ")}`]
+            : ["Personalised roadmap and skill benchmarks"],
+          selected: false,
+        });
+      }
+
+      if (paths.length) paths[0].selected = true;
+      if (alive) {
+        setCareerPaths(paths);
+        setLoadingPaths(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const toggleSelect = (id) => {
     setCareerPaths((prev) =>
@@ -63,7 +129,7 @@ export default function CareerPathScreen() {
         id: Date.now().toString(),
         title: newTitle.trim(),
         company: newCompany.trim() || "Preferred Industry",
-        bullets: ["User custom selection"],
+        bullets: ["Your custom selection"],
         selected: true,
       },
     ]);
@@ -75,10 +141,23 @@ export default function CareerPathScreen() {
 
   const hasSelection = careerPaths.some((item) => item.selected);
 
-  const handleConfirm = () => {
-    if (!hasSelection) return;
-    // Replace stack to tab navigation dashboard
-    router.replace("/(tabs)");
+  const handleConfirm = async () => {
+    if (!hasSelection || saving) return;
+    setSaving(true);
+    try {
+      const chosen = careerPaths.filter((p) => p.selected);
+      await updateAppState({ careerPaths: chosen, onboardingComplete: true });
+      const goal = chosen.map((p) => p.title.replace(/,\s*\d+%$/, "")).join(" / ");
+      try {
+        await profileService.updateMyProfile({ careerGoal: goal.slice(0, 250) });
+      } catch (e) {
+        // non-blocking
+      }
+      invalidateSkillBridge();
+      router.replace("/(tabs)");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -107,8 +186,18 @@ export default function CareerPathScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Top Career Path</Text>
+        {!!notice && <Text style={styles.noticeText}>{notice}</Text>}
 
-        {/* Grouped Career Card Container */}
+        {loadingPaths ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color="#7A1380" />
+            <Text style={styles.noticeText}>Matching you with opportunities...</Text>
+          </View>
+        ) : careerPaths.length === 0 ? (
+          <Text style={styles.noticeText}>
+            No matches yet — add a preferred career path below to continue.
+          </Text>
+        ) : (
         <View style={styles.cardContainer}>
           {careerPaths.map((item, index) => (
             <View key={item.id}>
@@ -152,6 +241,7 @@ export default function CareerPathScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* Add Preferred Career Path Button */}
         <TouchableOpacity
@@ -172,9 +262,12 @@ export default function CareerPathScreen() {
             hasSelection ? styles.ctaButtonActive : styles.ctaButtonDisabled,
           ]}
           onPress={handleConfirm}
-          disabled={!hasSelection}
+          disabled={!hasSelection || saving}
           activeOpacity={hasSelection ? 0.85 : 1}
         >
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
           <Text
             style={[
               styles.ctaButtonText,
@@ -183,6 +276,7 @@ export default function CareerPathScreen() {
           >
             Confirm & Launch Dashboard
           </Text>
+          )}
           <Feather
             name="arrow-right"
             size={20}
@@ -267,6 +361,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 24,
+  },
+  noticeText: {
+    fontSize: 13,
+    color: "#5B4E5A",
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  loadingBox: {
+    alignItems: "center",
+    paddingVertical: 32,
+    gap: 12,
   },
   title: {
     fontSize: 22,

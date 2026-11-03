@@ -3,6 +3,8 @@ import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Modal,
   ScrollView,
   StatusBar,
@@ -15,6 +17,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import { getErrorMessage } from "../services/api";
+import {
+  buildCvFormData,
+  cvService,
+  profileService,
+  skillGapService,
+  unwrap,
+} from "../services/endpoints";
+import { getAppState, getToken, updateAppState } from "../services/session";
+import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
 
 const EXPERIENCE_OPTIONS = ["0–1 yrs", "1–3 yrs", "3–5 yrs", "5+ yrs"];
 const STATUS_OPTIONS = [
@@ -28,30 +40,26 @@ const STATUS_OPTIONS = [
 export default function ProfileSetupScreen() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(false);
 
   // --- Step 1 State ---
   const [status, setStatus] = useState("Recent Graduate");
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [field, setField] = useState("");
+  const [targetRole, setTargetRole] = useState("");
   const [experience, setExperience] = useState("0–1 yrs");
   const [openToRemote, setOpenToRemote] = useState(true);
 
   // --- Step 2 State ---
-  const [uploadedFile, setUploadedFile] = useState({
-    name: "Amara_Ejike_CV.pdf",
-    size: "1.2 MB",
-  });
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [cvDocAsset, setCvDocAsset] = useState(null);
 
   // --- Step 3 State ---
-  const [experienceText, setExperienceText] = useState(
-    "Graduate Trainee – First Bank Nigeria",
-  );
+  const [experienceText, setExperienceText] = useState("");
+  const [cvParsed, setCvParsed] = useState(false);
+  const [loadingLabel, setLoadingLabel] = useState("");
   const [isEditingExperience, setIsEditingExperience] = useState(false);
-  const [skills, setSkills] = useState([
-    { id: "1", name: "Financial Analysis", selected: true },
-    { id: "2", name: "Excel Modeling", selected: false },
-    { id: "3", name: "Data Cleaning", selected: true },
-  ]);
+  const [skills, setSkills] = useState([]);
   const [newSkillText, setNewSkillText] = useState("");
   const [skillModalVisible, setSkillModalVisible] = useState(false);
 
@@ -70,17 +78,21 @@ export default function ProfileSetupScreen() {
         type: [
           "application/pdf",
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/msword",
         ],
         copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
         const file = result.assets[0];
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+        const sizeMb = file.size
+          ? (file.size / (1024 * 1024)).toFixed(1)
+          : "1.2";
         setUploadedFile({
           name: file.name,
           size: `${sizeMb} MB`,
         });
+        setCvDocAsset(file);
       }
     } catch (err) {
       console.log("Error picking document:", err);
@@ -113,13 +125,190 @@ export default function ProfileSetupScreen() {
     setSkillModalVisible(false);
   };
 
-  const handleNext = () => {
+  // Map onboarding answers → API enum: Student | Entry | Mid | Senior | Pivot
+  const getCareerStage = () => {
+    if (status === "Undergraduate") return "Student";
+    if (status === "Career Transitioner") return "Pivot";
+    if (experience === "5+ yrs") return "Senior";
+    if (experience === "3–5 yrs") return "Mid";
+    return "Entry";
+  };
+
+  const ensureSignedIn = async () => {
+    const token = await getToken();
+    if (!token) {
+      Alert.alert(
+        "Please log in",
+        "Your session was not found. Log in to continue setting up your profile.",
+        [{ text: "OK", onPress: () => router.replace("/login") }],
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
     if (currentStep === 1) {
+      if (!targetRole.trim()) {
+        Alert.alert(
+          "Target role needed",
+          "Tell us the role you're aiming for (e.g. Data Analyst) so we can benchmark your skills.",
+        );
+        return;
+      }
       setCurrentStep(2);
-    } else if (currentStep === 2) {
-      setCurrentStep(3);
-    } else {
-      router.push("/career-path");
+      return;
+    }
+
+    if (currentStep === 2) {
+      if (!cvDocAsset) {
+        Alert.alert(
+          "No CV Selected",
+          "Browse and pick a file, or tap 'Fill Manually' to continue without one.",
+        );
+        return;
+      }
+      if (!(await ensureSignedIn())) return;
+
+      setLoading(true);
+      setLoadingLabel("Uploading CV...");
+      try {
+        // 1) Upload (multipart key "cv")
+        const uploadRes = await cvService.uploadCV(buildCvFormData(cvDocAsset));
+        const uploaded = unwrap(uploadRes);
+        const cvId = uploaded?.id;
+        if (!cvId)
+          throw new Error("Upload succeeded but no CV id was returned.");
+        await updateAppState({ cvId });
+
+        // 2) AI skill-gap analysis
+        setLoadingLabel("Analysing with AI...");
+        const analysisRes = await cvService.analyzeCV(cvId, {
+          targetJobTitle: targetRole.trim(),
+          industryFocus: field.trim() || undefined,
+          careerStage: getCareerStage(),
+          primaryGoal: "Gap Analysis",
+        });
+        const result = unwrap(analysisRes) || {};
+        const gap = result.skillGap || {};
+        const skillGapId = result.skillGapId || gap.id;
+
+        await updateAppState({
+          skillGapId,
+          analysisId: result.analysisId,
+          targetRole: targetRole.trim(),
+        });
+
+        const extracted = Array.isArray(gap.currentSkills)
+          ? gap.currentSkills
+          : [];
+        if (extracted.length > 0) {
+          setSkills(
+            extracted.map((name, index) => ({
+              id: `cv-${index}`,
+              name:
+                typeof name === "string"
+                  ? titleCase(name)
+                  : name?.name || String(name),
+              selected: true,
+            })),
+          );
+        }
+
+        const ar = result.analysisResult || {};
+        const summary =
+          ar.summary || ar.experienceSummary || ar.experience || ar.overview;
+        if (typeof summary === "string" && summary.trim()) {
+          setExperienceText(summary.trim());
+        }
+        setCvParsed(true);
+        setCurrentStep(3);
+      } catch (err) {
+        console.log(
+          "CV upload/analyze error:",
+          err?.response?.data || err?.message,
+        );
+        if (err?.response?.status === 401) return; // root layout redirects to login
+        Alert.alert(
+          "We couldn't analyse your CV",
+          `${getErrorMessage(err)}\n\nYou can continue and add your skills manually.`,
+          [
+            { text: "Try Again", style: "cancel" },
+            { text: "Fill Manually", onPress: () => setCurrentStep(3) },
+          ],
+        );
+      } finally {
+        setLoading(false);
+        setLoadingLabel("");
+      }
+      return;
+    }
+
+    // ---- Step 3: save profile + make sure a skill-gap analysis exists ----
+    if (!(await ensureSignedIn())) return;
+    const selectedSkills = skills.filter((s) => s.selected).map((s) => s.name);
+    if (selectedSkills.length === 0) {
+      Alert.alert(
+        "Add your skills",
+        "Select or add at least one skill to continue.",
+      );
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await profileService.updateMyProfile({
+        bio: `Skills: ${selectedSkills.join(", ")}`,
+        education: `${status}${field.trim() ? ` • ${field.trim()}` : ""}`,
+        experience: `${experienceText.trim() || "Not specified"} (${experience})`,
+        location: openToRemote ? "Open to Remote" : "Onsite",
+        careerGoal: targetRole.trim(),
+      });
+
+      // Manual path (no CV) → create a skill gap from the confirmed skills so
+      // the dashboard, roadmap and matching screens have data to work with.
+      const state = await getAppState();
+      if (!state.skillGapId) {
+        try {
+          const gapRes = await skillGapService.create({
+            targetJobTitle: targetRole.trim().toLowerCase(),
+            currentSkills: selectedSkills.map((s) => s.toLowerCase()),
+            requiredSkills: [],
+          });
+          const gap = unwrap(gapRes);
+          if (gap?.id) await updateAppState({ skillGapId: gap.id });
+        } catch (gapErr) {
+          console.log(
+            "Skill gap create notice:",
+            gapErr?.response?.data || gapErr?.message,
+          );
+        }
+      }
+
+      await updateAppState({
+        onboardingComplete: true,
+        targetRole: targetRole.trim(),
+        confirmedSkills: selectedSkills,
+      });
+      invalidateSkillBridge();
+      router.replace("/career-path");
+    } catch (err) {
+      if (err?.response?.status === 401) return;
+      Alert.alert("Couldn't save your profile", getErrorMessage(err), [
+        { text: "Retry", style: "cancel" },
+        {
+          text: "Skip for now",
+          onPress: async () => {
+            await updateAppState({
+              onboardingComplete: true,
+              targetRole: targetRole.trim(),
+            });
+            router.replace("/career-path");
+          },
+        },
+      ]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -238,6 +427,18 @@ export default function ProfileSetupScreen() {
               />
             </View>
 
+            {/* Target Role */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Target Role</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Data Analyst, Backend Developer"
+                placeholderTextColor="#A894A6"
+                value={targetRole}
+                onChangeText={setTargetRole}
+              />
+            </View>
+
             {/* Years Of Experience */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Years Of Experience</Text>
@@ -296,9 +497,18 @@ export default function ProfileSetupScreen() {
               style={styles.ctaButton}
               onPress={handleNext}
               activeOpacity={0.85}
+              disabled={loading}
             >
-              <Text style={styles.ctaButtonText}>Continue to CV Upload</Text>
-              <Feather name="arrow-right" size={20} color="#FFFFFF" />
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text style={styles.ctaButtonText}>
+                    Continue to CV Upload
+                  </Text>
+                  <Feather name="arrow-right" size={20} color="#FFFFFF" />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -349,7 +559,10 @@ export default function ProfileSetupScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => setUploadedFile(null)}
+                    onPress={() => {
+                      setUploadedFile(null);
+                      setCvDocAsset(null);
+                    }}
                     hitSlop={10}
                   >
                     <Feather name="trash-2" size={18} color="#7A1380" />
@@ -371,9 +584,23 @@ export default function ProfileSetupScreen() {
               style={styles.ctaButton}
               onPress={handleNext}
               activeOpacity={0.85}
+              disabled={loading}
             >
-              <Text style={styles.ctaButtonText}>Parse CV & Continue</Text>
-              <Feather name="arrow-right" size={20} color="#FFFFFF" />
+              {loading ? (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.ctaButtonText}>
+                    {loadingLabel || "Uploading & Parsing..."}
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.ctaButtonText}>Parse CV & Continue</Text>
+                  <Feather name="arrow-right" size={20} color="#FFFFFF" />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -383,8 +610,9 @@ export default function ProfileSetupScreen() {
           <View>
             <Text style={styles.title}>Verify Your Skills & Profile</Text>
             <Text style={styles.subtitle}>
-              Our AI extracted these from your CV. Tap (x) to remove or edit
-              them before proceeding
+              {cvParsed
+                ? "Our AI extracted these from your CV. Tap (x) to remove or edit them before proceeding"
+                : "Add the skills you already have and a short summary of your experience"}
             </Text>
 
             {/* Extracted Experience Card */}
@@ -413,10 +641,20 @@ export default function ProfileSetupScreen() {
                   style={styles.experienceInput}
                   value={experienceText}
                   onChangeText={setExperienceText}
+                  placeholder="e.g. Graduate Trainee – First Bank Nigeria"
+                  placeholderTextColor="#A894A6"
                   multiline
+                  autoFocus
                 />
               ) : (
-                <Text style={styles.experienceCardText}>{experienceText}</Text>
+                <Text
+                  style={[
+                    styles.experienceCardText,
+                    !experienceText && { color: "#A894A6" },
+                  ]}
+                >
+                  {experienceText || "Tap Edit to describe your experience"}
+                </Text>
               )}
             </View>
 
@@ -429,6 +667,11 @@ export default function ProfileSetupScreen() {
             >
               Possessed Skills ({skills.length})
             </Text>
+            {skills.length === 0 && (
+              <Text style={[styles.subtitle, { marginBottom: 8 }]}>
+                No skills yet — tap below to add your first one.
+              </Text>
+            )}
 
             <View style={styles.skillsWrapper}>
               {skills.map((skill) => (
@@ -478,11 +721,18 @@ export default function ProfileSetupScreen() {
               style={[styles.ctaButton, { marginTop: 32 }]}
               onPress={handleNext}
               activeOpacity={0.85}
+              disabled={loading}
             >
-              <Text style={styles.ctaButtonText}>
-                Confirm & Launch Dashboard
-              </Text>
-              <Feather name="arrow-right" size={20} color="#FFFFFF" />
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text style={styles.ctaButtonText}>
+                    Confirm & Launch Dashboard
+                  </Text>
+                  <Feather name="arrow-right" size={20} color="#FFFFFF" />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
