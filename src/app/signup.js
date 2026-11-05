@@ -24,6 +24,7 @@ import { authService } from "../services/endpoints";
 
 export default function SignUpScreen() {
   const router = useRouter();
+  console.log("SKILLBRIDGE LOG TEST", new Date().toISOString());
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");

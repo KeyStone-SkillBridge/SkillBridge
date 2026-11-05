@@ -173,22 +173,36 @@ export default function ProfileSetupScreen() {
       setLoading(true);
       setLoadingLabel("Uploading CV...");
       try {
-        // 1) Upload (multipart key "cv")
+        // 1) Upload CV (multipart key "cv")
+        console.log("[CV DEBUG] Starting CV upload...");
         const uploadRes = await cvService.uploadCV(buildCvFormData(cvDocAsset));
+        console.log("[CV DEBUG] CV upload successful!");
+        console.log("[CV DEBUG] Upload response:", uploadRes?.data);
+
         const uploaded = unwrap(uploadRes);
         const cvId = uploaded?.id;
-        if (!cvId)
+        if (!cvId) {
           throw new Error("Upload succeeded but no CV id was returned.");
+        }
+
+        console.log("[CV DEBUG] CV ID:", cvId);
         await updateAppState({ cvId });
 
         // 2) AI skill-gap analysis
         setLoadingLabel("Analysing with AI...");
+        console.log("[CV DEBUG] Starting CV analysis...");
+        console.log("[CV DEBUG] Sending analysis request for CV:", cvId);
+
         const analysisRes = await cvService.analyzeCV(cvId, {
           targetJobTitle: targetRole.trim(),
           industryFocus: field.trim() || undefined,
           careerStage: getCareerStage(),
           primaryGoal: "Gap Analysis",
         });
+
+        console.log("[CV DEBUG] CV analysis successful!");
+        console.log("[CV DEBUG] Analysis response:", analysisRes?.data);
+
         const result = unwrap(analysisRes) || {};
         const gap = result.skillGap || {};
         const skillGapId = result.skillGapId || gap.id;
@@ -224,10 +238,24 @@ export default function ProfileSetupScreen() {
         setCvParsed(true);
         setCurrentStep(3);
       } catch (err) {
+        console.log("[CV DEBUG] REQUEST FAILED");
+        console.log("[CV DEBUG] HTTP Status:", err?.response?.status);
+        console.log("[CV DEBUG] Request URL:", err?.config?.url);
         console.log(
-          "CV upload/analyze error:",
-          err?.response?.data || err?.message,
+          "[CV DEBUG] Server Response:",
+          JSON.stringify(err?.response?.data, null, 2),
         );
+
+        console.log("[CV DEBUG] Response Status:", err?.response?.status);
+
+        console.log("[CV DEBUG] Response URL:", err?.response?.config?.url);
+
+        console.log(
+          "[CV DEBUG] Request Method:",
+          err?.response?.config?.method,
+        );
+        console.log("[CV DEBUG] Error Message:", err?.message);
+
         if (err?.response?.status === 401) return; // root layout redirects to login
         Alert.alert(
           "We couldn't analyse your CV",
@@ -703,7 +731,6 @@ export default function ProfileSetupScreen() {
                 </View>
               ))}
             </View>
-
             {/* Add Custom Skill / Interest Button */}
             <TouchableOpacity
               style={styles.addSkillButton}

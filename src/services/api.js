@@ -1,10 +1,6 @@
 import axios from "axios";
 
-import {
-  clearSession,
-  getToken,
-  notifyUnauthorized,
-} from "./session";
+import { clearSession, getToken, notifyUnauthorized } from "./session";
 
 export const BASE_URL =
   "https://skillbridge-api.tb-skillbridge-backend.workers.dev";
@@ -38,9 +34,17 @@ api.interceptors.request.use(
           };
         }
       } else if (__DEV__) {
-        console.warn(`[api] No token stored — ${config.method?.toUpperCase()} ${config.url} will be rejected with 401`);
+        console.warn(
+          `[api] No token stored — ${config.method?.toUpperCase()} ${config.url} will be rejected with 401`,
+        );
       }
     }
+
+    // console.log("[AUTH DEBUG]", {
+    //   hasAuthorizationHeader: !!config.headers?.Authorization,
+    //   method: config.method,
+    //   url: config.url,
+    // });
     return config;
   },
   (error) => Promise.reject(error),
@@ -74,7 +78,10 @@ api.interceptors.response.use(
 );
 
 // Human-readable message from any axios / fetch error.
-export function getErrorMessage(error, fallback = "Something went wrong. Please try again.") {
+export function getErrorMessage(
+  error,
+  fallback = "Something went wrong. Please try again.",
+) {
   if (!error) return fallback;
   if (error.userMessage) return error.userMessage;
   const data = error.response?.data;
@@ -85,10 +92,14 @@ export function getErrorMessage(error, fallback = "Something went wrong. Please 
     data?.message ||
     data?.error ||
     data?.detail ||
-    (Array.isArray(data?.errors) ? data.errors.map((e) => e.message || e).join("\n") : null);
+    (Array.isArray(data?.errors)
+      ? data.errors.map((e) => e.message || e).join("\n")
+      : null);
   if (msg) return String(msg);
-  if (error.code === "ECONNABORTED") return "The request timed out. Check your connection and try again.";
-  if (error.message === "Network Error") return "No internet connection. Please check your network.";
+  if (error.code === "ECONNABORTED")
+    return "The request timed out. Check your connection and try again.";
+  if (error.message === "Network Error")
+    return "No internet connection. Please check your network.";
   return error.message || fallback;
 }
 
@@ -128,7 +139,8 @@ export async function uploadMultipart(path, formData, method = "POST") {
     if (status) {
       message = serverMsg || `Upload failed (${status}).`;
     } else if (e?.code === "ECONNABORTED") {
-      message = "The upload timed out. Please try a smaller file or a better connection.";
+      message =
+        "The upload timed out. Please try a smaller file or a better connection.";
     } else {
       // Include the underlying reason so we can see it if it persists.
       message = `Upload failed: ${e?.message || "unknown network error"}. Please check your connection and try again.`;
