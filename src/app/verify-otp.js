@@ -21,6 +21,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import LogoSvg from "../../assets/images/logo.svg";
 import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
+import { logError } from "../services/logger";
 
 export default function VerifyOtpScreen() {
   const router = useRouter();
@@ -103,6 +104,7 @@ export default function VerifyOtpScreen() {
           await AsyncStorage.setItem("already_onboarded", "true");
           router.replace("/profile-setup");
         } catch (loginErr) {
+          logError("verify-otp", "handleVerify", loginErr);
           const msg = (loginErr?.response?.data?.message || "").toLowerCase();
           Alert.alert(
             "Not verified yet",
@@ -125,6 +127,7 @@ export default function VerifyOtpScreen() {
         });
       }
     } catch (error) {
+      logError("verify-otp", "verify reset code", error);
       const errorMsg = getErrorMessage(error, "Verification code is invalid or has expired.");
       Alert.alert("Verification Failed", errorMsg);
     } finally {
@@ -145,6 +148,7 @@ export default function VerifyOtpScreen() {
         `A fresh verification code was sent to ${userEmail}.`,
       );
     } catch (error) {
+      logError("verify-otp", "handleResend", error);
       Alert.alert(
         "Notice",
         "A new code could not be sent. Please check your network connection.",

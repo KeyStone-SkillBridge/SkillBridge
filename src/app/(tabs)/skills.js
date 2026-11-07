@@ -24,6 +24,7 @@ import { EmptyCard, LoadingState } from "../../components/StateViews";
 import { getErrorMessage } from "../../services/api";
 import { addSkillToRoadmap, skillIcon } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+import { logError } from "../../services/logger";
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -69,6 +70,7 @@ export default function SkillGapScreen() {
           : `"${titleCase(skill)}" was saved to your plan. It will appear on your Roadmap tab.`,
       );
     } catch (err) {
+      logError("skills", "handleAddToRoadmap", err);
       Alert.alert("Couldn't add skill", getErrorMessage(err));
     } finally {
       setAddingSkill(null);

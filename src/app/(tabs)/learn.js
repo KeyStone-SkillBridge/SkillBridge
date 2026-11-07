@@ -24,6 +24,7 @@ import { EmptyCard, LoadingState } from "../../components/StateViews";
 import { getErrorMessage } from "../../services/api";
 import { setLearningProgress, startLearning } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+import { logError } from "../../services/logger";
 
 const DIFFICULTY_LABEL = { beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced" };
 
@@ -68,7 +69,10 @@ export default function LearnScreen() {
       Alert.alert("No link", "This resource doesn't have a link yet.");
       return;
     }
-    Linking.openURL(url).catch(() => Alert.alert("Couldn't open link", url));
+    Linking.openURL(url).catch((e) => {
+      logError("learn", "open link", e);
+      Alert.alert("Couldn't open link", url);
+    });
   };
 
   const searchSkill = (skill) =>
@@ -81,6 +85,7 @@ export default function LearnScreen() {
       await reload();
       if (rec.url) openUrl(rec.url);
     } catch (err) {
+      logError("learn", "handleStart", err);
       Alert.alert("Couldn't start tracking", getErrorMessage(err));
     } finally {
       setBusyId(null);
@@ -93,6 +98,7 @@ export default function LearnScreen() {
       await setLearningProgress(record.id, pct);
       await reload();
     } catch (err) {
+      logError("learn", "handleProgress", err);
       Alert.alert("Couldn't update progress", getErrorMessage(err));
     } finally {
       setBusyId(null);

@@ -6,6 +6,7 @@ import { Animated, StatusBar, StyleSheet, Text, View } from "react-native";
 import LogoSvg from "../../assets/images/logo.svg";
 import { userService } from "../services/endpoints";
 import { getAppState, getToken } from "../services/session";
+import { log, logError } from "../services/logger";
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -46,6 +47,7 @@ export default function SplashScreen() {
             router.replace(state.onboardingComplete === false ? "/profile-setup" : "/(tabs)");
             return;
           } catch (err) {
+            logError("index", "validate stored session (getMe)", err);
             // 401 → interceptor already cleared the token; anything else
             // (offline) → still let them in with the cached session.
             if (err?.response?.status !== 401) {
@@ -55,12 +57,15 @@ export default function SplashScreen() {
           }
         }
 
+        log("index", "Routing", { hasOnboarded, hasToken: !!token });
+
         if (hasOnboarded === "true") {
           router.replace("/login");
         } else {
           router.replace("/onboarding");
         }
       } catch (e) {
+        logError("index", "determineRoute", e);
         await splashDelay;
         router.replace("/onboarding");
       }

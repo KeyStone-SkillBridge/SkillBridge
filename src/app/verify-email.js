@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -19,7 +18,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
+import { log, logError } from "../services/logger";
+import {
+  clearPendingCredentials,
+  extractToken,
+  extractUser,
+  getPendingCredentials,
+  saveSession,
+} from "../services/session";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
@@ -85,10 +93,36 @@ export default function VerifyEmailScreen() {
         code: fullCode,
       });
 
-      const token =
-        res?.data?.token || res?.data?.access_token || res?.data?.data?.token;
+      const token = extractToken(res?.data);
+      log("verify-email", "Email verified — token returned?", {
+        hasToken: !!token,
+      });
       if (token) {
-        await AsyncStorage.setItem("user_token", token);
+        await saveSession(token, extractUser(res?.data));
+      } else {
+        // verify-email returns no JWT — log in with the credentials kept
+        // in memory from signup.
+        const creds = getPendingCredentials(userEmail);
+        let signedIn = false;
+        if (creds) {
+          try {
+            await authService.loginAndStore(creds);
+            clearPendingCredentials();
+            signedIn = true;
+          } catch (loginError) {
+            logError("verify-email", "login after verify", loginError);
+          }
+        } else {
+          log("verify-email", "No pending credentials in memory — sending to login");
+        }
+        if (!signedIn) {
+          Alert.alert(
+            "Email verified",
+            "Your email is verified. Please log in to continue setting up your profile.",
+            [{ text: "Log in", onPress: () => router.replace("/login") }],
+          );
+          return;
+        }
       }
 
       Alert.alert("Success", "Email verified successfully!", [
@@ -98,13 +132,12 @@ export default function VerifyEmailScreen() {
         },
       ]);
     } catch (error) {
-      const errorMsg =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Verification code is invalid or has expired.";
+      logError("verify-email", "handleVerify", error);
 
-      Alert.alert("Verification Failed", errorMsg);
+      Alert.alert(
+        "Verification Failed",
+        getErrorMessage(error, "Verification code is invalid or has expired."),
+      );
     } finally {
       setLoading(false);
     }
@@ -124,6 +157,7 @@ export default function VerifyEmailScreen() {
         `A fresh verification code was sent to ${userEmail}.`,
       );
     } catch (error) {
+      logError("verify-email", "handleResend", error);
       Alert.alert(
         "Notice",
         "A new code could not be sent. Please check your network connection.",

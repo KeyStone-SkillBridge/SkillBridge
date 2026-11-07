@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import LogoSvg from "../../assets/images/logo.svg";
 import { authService } from "../services/endpoints";
+import { logError } from "../services/logger";
 
 export default function NewPasswordScreen() {
   const router = useRouter();
@@ -62,6 +63,7 @@ export default function NewPasswordScreen() {
         ],
       );
     } catch (error) {
+      logError("new-password", "handleResetPassword", error);
       const serverMessage =
         error.response?.data?.message ||
         error.response?.data?.detail ||

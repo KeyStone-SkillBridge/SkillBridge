@@ -13,6 +13,7 @@ import {
   unwrap,
 } from "./endpoints";
 import { getAppState, getCachedUser } from "./session";
+import { logError } from "./logger";
 
 // ---------------------------------------------------------------------------
 // Shared dashboard data. Every tab screen calls useSkillBridge(); data is
@@ -90,6 +91,7 @@ async function fetchAll() {
     try {
       recommendations = asList(await recommendationService.list());
     } catch (e) {
+      logError("useSkillBridge", "load CV list", e);
       // Public list currently 500s on the server — fine, show empty state.
     }
   }
@@ -106,6 +108,7 @@ async function fetchAll() {
     try {
       activeRoadmap = unwrap(await roadmapService.getById(activeRoadmapMeta.id));
     } catch (e) {
+      logError("useSkillBridge", "load active roadmap", e);
       // keep meta only
     }
   }
@@ -231,6 +234,7 @@ export function useSkillBridge() {
       const d = await loadSkillBridge(force);
       if (mounted.current) setData(d);
     } catch (e) {
+      logError("useSkillBridge", "refresh data", e);
       if (mounted.current) setError(e);
     } finally {
       if (mounted.current) setLoading(false);

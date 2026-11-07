@@ -1,6 +1,7 @@
 import { progressService, roadmapService, unwrap } from "./endpoints";
 import { getAppState, updateAppState } from "./session";
 import { invalidateSkillBridge, titleCase } from "./useSkillBridge";
+import { logError } from "./logger";
 
 // Pick an icon (MaterialCommunityIcons names) that fits a skill name.
 export function skillIcon(name = "") {
@@ -32,6 +33,7 @@ export async function generateRoadmap(skillGapId) {
     invalidateSkillBridge();
     return roadmap;
   } catch (err) {
+    logError("skillActions", "generate roadmap", err);
     if (err?.response?.status === 503) {
       err.userMessage =
         "AI roadmap generation isn't switched on for the server yet. Your gaps have been saved to your plan instead.";
@@ -78,6 +80,7 @@ export async function startLearning(recommendationId) {
   try {
     await progressService.start({ recommendationId: Number(recommendationId) });
   } catch (err) {
+    logError("skillActions", "start learning", err);
     if (err?.response?.status !== 409) throw err;
   }
   invalidateSkillBridge();

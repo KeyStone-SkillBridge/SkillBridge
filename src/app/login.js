@@ -23,6 +23,7 @@ import LogoSvg from "../../assets/images/logo.svg";
 import { getErrorMessage } from "../services/api";
 import { asList, authService, skillGapService } from "../services/endpoints";
 import { invalidateSkillBridge } from "../services/useSkillBridge";
+import { logError } from "../services/logger";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -72,11 +73,13 @@ export default function LoginScreen() {
       try {
         hasAnalysis = asList(await skillGapService.getAll()).length > 0;
       } catch (e) {
+        logError("login", "check CV analysis after login", e);
         // If this check fails, just go to the dashboard.
       }
 
       router.replace(hasAnalysis ? "/(tabs)" : "/profile-setup");
     } catch (error) {
+      logError("login", "handleLogin", error);
       const status = error.response?.status;
       const serverMessage =
         status === 401 || status === 400

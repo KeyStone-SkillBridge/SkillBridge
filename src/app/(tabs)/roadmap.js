@@ -27,6 +27,7 @@ import { getErrorMessage } from "../../services/api";
 import { getAppState, updateAppState } from "../../services/session";
 import { cycleTaskStatus, generateRoadmap } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
+import { logError } from "../../services/logger";
 
 const COACH_AVATAR = require("../../../assets/images/TundeAlabi.png"); // Points to your downloaded coach image asset
 
@@ -98,6 +99,7 @@ export default function RoadmapScreen() {
       await reload();
       Alert.alert("Roadmap ready", "Your personalised 90-day roadmap has been generated.");
     } catch (err) {
+      logError("roadmap", "handleGenerate", err);
       Alert.alert("Roadmap", getErrorMessage(err));
     } finally {
       setGenerating(false);
@@ -111,6 +113,7 @@ export default function RoadmapScreen() {
       await cycleTaskStatus(roadmap.id, task);
       await reload();
     } catch (err) {
+      logError("roadmap", "handleTaskPress", err);
       Alert.alert("Couldn't update task", getErrorMessage(err));
     } finally {
       setUpdatingTask(null);
@@ -127,7 +130,10 @@ export default function RoadmapScreen() {
 
   const openResource = (url) => {
     if (!url) return;
-    Linking.openURL(url).catch(() => Alert.alert("Couldn't open link", url));
+    Linking.openURL(url).catch((e) => {
+      logError("roadmap", "open link", e);
+      Alert.alert("Couldn't open link", url);
+    });
   };
 
   const renderTask = (task) => {

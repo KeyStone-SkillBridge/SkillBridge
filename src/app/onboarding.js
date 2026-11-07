@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import LogoSvg from "../../assets/images/logo.svg";
+import { logError } from "../services/logger";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SLIDES = [
@@ -81,6 +82,7 @@ export default function OnboardingScreen() {
     try {
       await AsyncStorage.setItem("already_onboarded", "true");
     } catch (e) {
+      logError("onboarding", "handleFinishOnboarding", e);
       console.error(e);
     }
     router.replace("/signup"); 

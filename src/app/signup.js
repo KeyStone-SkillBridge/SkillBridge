@@ -1,5 +1,4 @@
 import { Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
@@ -20,11 +19,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
 import LogoSvg from "../../assets/images/logo.svg";
+import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
+import { log, logError } from "../services/logger";
+import {
+  clearSession,
+  extractToken,
+  extractUser,
+  saveSession,
+  setPendingCredentials,
+} from "../services/session";
 
 export default function SignUpScreen() {
   const router = useRouter();
-  console.log("SKILLBRIDGE LOG TEST", new Date().toISOString());
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -70,13 +77,23 @@ export default function SignUpScreen() {
         name: cleanName,
       };
 
+      log("signup", "Registering account", { email: cleanEmail });
       const response = await authService.register(payload);
-      const data = response?.data;
+      log("signup", "Registered — token returned?", {
+        hasToken: !!extractToken(response?.data),
+      });
+      // A brand-new account must never inherit a previous account's token (or
+      // cached user / app state) left on this device.
+      await clearSession();
 
-      const token = data?.token || data?.access_token || data?.data?.token;
+      const token = extractToken(response?.data);
       if (token) {
-        await AsyncStorage.setItem("user_token", token);
+        await saveSession(token, extractUser(response?.data));
       }
+
+      // register/verify-email return no JWT, so keep the credentials in memory
+      // to log in once the email is verified.
+      setPendingCredentials(cleanEmail, password);
 
       // Navigate to the dedicated Sign Up Email Verification screen
       router.push({
@@ -87,13 +104,15 @@ export default function SignUpScreen() {
         },
       });
     } catch (error) {
-      const serverMessage =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Unable to create account. Please check your internet connection and try again.";
+      logError("signup", "handleNext (register)", error);
 
-      Alert.alert("Registration Error", serverMessage);
+      Alert.alert(
+        "Registration Error",
+        getErrorMessage(
+          error,
+          "Unable to create account. Please check your internet connection and try again.",
+        ),
+      );
     } finally {
       setLoading(false);
     }

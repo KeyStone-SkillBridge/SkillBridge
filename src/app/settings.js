@@ -20,6 +20,7 @@ import { getErrorMessage } from "../services/api";
 import { userService } from "../services/endpoints";
 import { clearSession } from "../services/session";
 import { invalidateSkillBridge } from "../services/useSkillBridge";
+import { logError } from "../services/logger";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -48,6 +49,7 @@ export default function SettingsScreen() {
     try {
       await userService.deleteMe();
     } catch (err) {
+      logError("settings", "confirmDeleteAccount", err);
       setDeleting(false);
       if (err?.response?.status === 401) return;
       Alert.alert("Couldn't delete account", getErrorMessage(err));

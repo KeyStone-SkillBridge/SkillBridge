@@ -23,6 +23,7 @@ import {
 } from "../services/endpoints";
 import { getAppState, updateAppState } from "../services/session";
 import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
+import { logError } from "../services/logger";
 
 const toPath = (match) => {
   const opp = match.opportunity || match;
@@ -71,6 +72,7 @@ export default function CareerPathScreen() {
         const matches = asList(await matchingService.generate());
         paths = matches.slice(0, 5).map(toPath);
       } catch (e) {
+        logError("career-path", "load matches", e);
         if (e?.response?.status === 401) return;
         console.log("Matching notice:", e?.response?.data || e?.message);
       }
@@ -84,6 +86,7 @@ export default function CareerPathScreen() {
           paths = opps.map((o) => toPath(o));
           if (paths.length) setNotice("Based on open roles for your target. Upload a CV to get match scores.");
         } catch (e) {
+          logError("career-path", "load opportunities", e);
           // ignore
         }
       }
@@ -151,6 +154,7 @@ export default function CareerPathScreen() {
       try {
         await profileService.updateMyProfile({ careerGoal: goal.slice(0, 250) });
       } catch (e) {
+        logError("career-path", "save career goal", e);
         // non-blocking
       }
       invalidateSkillBridge();

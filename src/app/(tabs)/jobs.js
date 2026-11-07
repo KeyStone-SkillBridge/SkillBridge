@@ -23,6 +23,7 @@ import { EmptyCard, LoadingState } from "../../components/StateViews";
 import { getErrorMessage } from "../../services/api";
 import { asList, matchingService, opportunityService } from "../../services/endpoints";
 import { initials, invalidateSkillBridge, titleCase, useSkillBridge } from "../../services/useSkillBridge";
+import { logError } from "../../services/logger";
 
 const BOOKMARKS_KEY = "skillbridge_bookmarks";
 const TYPE_LABEL = {
@@ -58,7 +59,7 @@ export default function JobsScreen() {
   useEffect(() => {
     AsyncStorage.getItem(BOOKMARKS_KEY)
       .then((raw) => raw && setBookmarks(JSON.parse(raw)))
-      .catch(() => {});
+      .catch((e) => logError("jobs", "load bookmarks", e));
   }, []);
 
   const runSearch = useCallback(async (q) => {
@@ -71,6 +72,7 @@ export default function JobsScreen() {
       });
       setSearchResults(asList(res));
     } catch (err) {
+      logError("jobs", "runSearch", err);
       if (err?.response?.status !== 401) setSearchResults([]);
     } finally {
       setSearching(false);
@@ -114,7 +116,9 @@ export default function JobsScreen() {
     setBookmarks(next);
     try {
       await AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next));
-    } catch (e) {}
+    } catch (e) {
+      logError("jobs", "save bookmarks", e);
+    }
   };
 
   const handleGenerate = async () => {
@@ -124,6 +128,7 @@ export default function JobsScreen() {
       invalidateSkillBridge();
       await reload();
     } catch (err) {
+      logError("jobs", "handleGenerate", err);
       Alert.alert(
         "Couldn't generate matches",
         err?.response?.status === 400
@@ -140,15 +145,16 @@ export default function JobsScreen() {
       Alert.alert("Apply", "This opportunity doesn't have an application link yet.");
       return;
     }
-    Linking.openURL(opp.applicationUrl).catch(() =>
-      Alert.alert("Couldn't open link", opp.applicationUrl),
-    );
+    Linking.openURL(opp.applicationUrl).catch((e) => {
+      logError("jobs", "open application link", e);
+      Alert.alert("Couldn't open link", opp.applicationUrl);
+    });
   };
 
   const share = (opp) =>
     Share.share({
       message: `${opp.title} at ${opp.company}${opp.applicationUrl ? `\n${opp.applicationUrl}` : ""}`,
-    }).catch(() => {});
+    }).catch((e) => logError("jobs", "share opportunity", e));
 
   // Gauge
   const circleSize = 60;

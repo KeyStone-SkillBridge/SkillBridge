@@ -32,6 +32,7 @@ import {
 } from "../services/endpoints";
 import { getAppState, setCachedUser, updateAppState } from "../services/session";
 import { initials, invalidateSkillBridge, useSkillBridge } from "../services/useSkillBridge";
+import { logError } from "../services/logger";
 
 const FIELDS = [
   { key: "fullName", label: "Full Name", placeholder: "Your full name" },
@@ -84,7 +85,10 @@ export default function ProfileScreen() {
     cvService
       .getAnalysisHistory(activeCv.id)
       .then((res) => setHistory(asList(res)))
-      .catch(() => setHistory([]));
+      .catch((e) => {
+        logError("profile-settings", "load analysis history", e);
+        setHistory([]);
+      });
   }, [activeCv?.id]);
 
   const completionChecks = [
@@ -124,6 +128,7 @@ export default function ProfileScreen() {
       setEditing(false);
       Alert.alert("Saved", "Your profile has been updated.");
     } catch (err) {
+      logError("profile-settings", "save profile", err);
       Alert.alert("Couldn't save", getErrorMessage(err));
     } finally {
       setSaving(false);
@@ -144,6 +149,7 @@ export default function ProfileScreen() {
       if (result.canceled || !result.assets?.[0]) return;
       file = result.assets[0];
     } catch (err) {
+      logError("profile-settings", "pick document", err);
       console.log("Error picking document:", err);
       return;
     }
@@ -153,6 +159,7 @@ export default function ProfileScreen() {
       return;
     }
 
+    let saved = false;
     try {
       setCvBusy("Uploading CV...");
       const formData = buildCvFormData(file);
@@ -162,27 +169,57 @@ export default function ProfileScreen() {
       const cv = unwrap(res);
       const cvId = cv?.id || activeCv?.id;
       await updateAppState({ cvId });
+      saved = true;
+      invalidateSkillBridge();
 
       setCvBusy("Re-analysing skills...");
-      const state = await getAppState();
-      const target = profile.careerGoal || state.targetRole || stats.targetRole || undefined;
-      const analysis = unwrap(
-        await cvService.analyzeCV(cvId, {
-          targetJobTitle: target ? String(target).split(" / ")[0].slice(0, 120) : undefined,
-          careerStage: "Entry",
-          primaryGoal: "Gap Analysis",
-        }),
-      );
-      if (analysis?.skillGapId) await updateAppState({ skillGapId: analysis.skillGapId });
+      await runAnalysis(cvId);
 
       invalidateSkillBridge();
       await reload();
       Alert.alert("CV Updated", "Your skills and gaps have been recalculated.");
     } catch (err) {
+      logError("profile-settings", "CV update", err);
       if (err?.response?.status === 401) return;
-      Alert.alert("CV update failed", getErrorMessage(err));
+      Alert.alert(
+        saved ? "CV saved, analysis failed" : "CV update failed",
+        saved
+          ? `${getErrorMessage(err)}\n\nYour CV was saved. Tap "Re-run analysis" to try the analysis again.`
+          : getErrorMessage(err),
+      );
       invalidateSkillBridge();
       reload();
+    } finally {
+      setCvBusy("");
+    }
+  };
+
+  // Ask the AI to analyse the CV again (no re-upload needed).
+  const runAnalysis = async (cvId) => {
+    const state = await getAppState();
+    const target = profile.careerGoal || state.targetRole || stats.targetRole || undefined;
+    const analysis = unwrap(
+      await cvService.analyzeCV(cvId, {
+        targetJobTitle: target ? String(target).split(" / ")[0].slice(0, 120) : undefined,
+        careerStage: "Entry",
+        primaryGoal: "Gap Analysis",
+      }),
+    );
+    if (analysis?.skillGapId) await updateAppState({ skillGapId: analysis.skillGapId });
+  };
+
+  const handleReanalyze = async () => {
+    if (!activeCv?.id || cvBusy) return;
+    try {
+      setCvBusy("Re-analysing skills...");
+      await runAnalysis(activeCv.id);
+      invalidateSkillBridge();
+      await reload();
+      Alert.alert("Analysis complete", "Your skills and gaps have been recalculated.");
+    } catch (err) {
+      logError("profile-settings", "re-run analysis", err);
+      if (err?.response?.status === 401) return;
+      Alert.alert("Analysis failed", getErrorMessage(err));
     } finally {
       setCvBusy("");
     }
@@ -484,6 +521,19 @@ export default function ProfileScreen() {
             </>
           )}
         </TouchableOpacity>
+
+        {/* Run the analysis again on the CV already on file */}
+        {activeCv && (
+          <TouchableOpacity
+            style={[styles.reanalyzeBtn, !!cvBusy && { opacity: 0.5 }]}
+            onPress={handleReanalyze}
+            activeOpacity={0.85}
+            disabled={!!cvBusy}
+          >
+            <Feather name="refresh-cw" size={15} color="#7A1380" />
+            <Text style={styles.reanalyzeBtnText}>Re-run analysis</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Auto Gap Analysis Banner */}
         <View style={styles.gapBanner}>
@@ -1023,6 +1073,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#E8D6E6",
     marginTop: 1,
+  },
+  reanalyzeBtn: {
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: "#F0E5F7",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginBottom: 12,
+  },
+  reanalyzeBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7A1380",
   },
   reuploadCard: {
     borderWidth: 1.2,

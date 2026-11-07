@@ -27,6 +27,7 @@ import {
 } from "../services/endpoints";
 import { getAppState, getToken, updateAppState } from "../services/session";
 import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
+import { logError } from "../services/logger";
 
 const EXPERIENCE_OPTIONS = ["0–1 yrs", "1–3 yrs", "3–5 yrs", "5+ yrs"];
 const STATUS_OPTIONS = [
@@ -53,6 +54,9 @@ export default function ProfileSetupScreen() {
   // --- Step 2 State ---
   const [uploadedFile, setUploadedFile] = useState(null);
   const [cvDocAsset, setCvDocAsset] = useState(null);
+  // Set once the CV is on the server, so a retry only re-runs the analysis
+  // instead of uploading the same file again.
+  const [uploadedCvId, setUploadedCvId] = useState(null);
 
   // --- Step 3 State ---
   const [experienceText, setExperienceText] = useState("");
@@ -93,8 +97,10 @@ export default function ProfileSetupScreen() {
           size: `${sizeMb} MB`,
         });
         setCvDocAsset(file);
+        setUploadedCvId(null); // a different file needs a fresh upload
       }
     } catch (err) {
+      logError("profile-setup", "pick document", err);
       console.log("Error picking document:", err);
     }
   };
@@ -171,22 +177,30 @@ export default function ProfileSetupScreen() {
       if (!(await ensureSignedIn())) return;
 
       setLoading(true);
-      setLoadingLabel("Uploading CV...");
+      let cvId = uploadedCvId;
+      setLoadingLabel(cvId ? "Analysing with AI..." : "Uploading CV...");
       try {
-        // 1) Upload CV (multipart key "cv")
-        console.log("[CV DEBUG] Starting CV upload...");
-        const uploadRes = await cvService.uploadCV(buildCvFormData(cvDocAsset));
-        console.log("[CV DEBUG] CV upload successful!");
-        console.log("[CV DEBUG] Upload response:", uploadRes?.data);
+        if (cvId) {
+          console.log("[CV DEBUG] CV already uploaded — skipping upload, retrying analysis:", cvId);
+        } else {
+          // 1) Upload CV (multipart key "cv")
+          console.log("[CV DEBUG] Starting CV upload...");
+          const uploadRes = await cvService.uploadCV(buildCvFormData(cvDocAsset));
+          console.log("[CV DEBUG] CV upload successful!");
+          console.log("[CV DEBUG] Upload response:", uploadRes?.data);
 
-        const uploaded = unwrap(uploadRes);
-        const cvId = uploaded?.id;
-        if (!cvId) {
-          throw new Error("Upload succeeded but no CV id was returned.");
+          const uploaded = unwrap(uploadRes);
+          cvId = uploaded?.id;
+          if (!cvId) {
+            throw new Error("Upload succeeded but no CV id was returned.");
+          }
+          setUploadedCvId(cvId);
+
+          console.log("[CV DEBUG] CV ID:", cvId);
+          await updateAppState({ cvId });
+          // The CV now exists on the server — make the profile reload it.
+          invalidateSkillBridge();
         }
-
-        console.log("[CV DEBUG] CV ID:", cvId);
-        await updateAppState({ cvId });
 
         // 2) AI skill-gap analysis
         setLoadingLabel("Analysing with AI...");
@@ -238,6 +252,7 @@ export default function ProfileSetupScreen() {
         setCvParsed(true);
         setCurrentStep(3);
       } catch (err) {
+        logError("profile-setup", "CV upload/analysis", err);
         console.log("[CV DEBUG] REQUEST FAILED");
         console.log("[CV DEBUG] HTTP Status:", err?.response?.status);
         console.log("[CV DEBUG] Request URL:", err?.config?.url);
@@ -259,9 +274,9 @@ export default function ProfileSetupScreen() {
         if (err?.response?.status === 401) return; // root layout redirects to login
         Alert.alert(
           "We couldn't analyse your CV",
-          `${getErrorMessage(err)}\n\nYou can continue and add your skills manually.`,
+          `${getErrorMessage(err)}\n\n${cvId ? "Your CV was uploaded. Tap \"Retry Analysis\" to run the analysis again, or " : "You can "}continue and add your skills manually.`,
           [
-            { text: "Try Again", style: "cancel" },
+            { text: cvId ? "Retry Analysis" : "Try Again", style: "cancel" },
             { text: "Fill Manually", onPress: () => setCurrentStep(3) },
           ],
         );
@@ -306,6 +321,7 @@ export default function ProfileSetupScreen() {
           const gap = unwrap(gapRes);
           if (gap?.id) await updateAppState({ skillGapId: gap.id });
         } catch (gapErr) {
+          logError("profile-setup", "create skill gap", gapErr);
           console.log(
             "Skill gap create notice:",
             gapErr?.response?.data || gapErr?.message,
@@ -321,6 +337,7 @@ export default function ProfileSetupScreen() {
       invalidateSkillBridge();
       router.replace("/career-path");
     } catch (err) {
+      logError("profile-setup", "save profile", err);
       if (err?.response?.status === 401) return;
       Alert.alert("Couldn't save your profile", getErrorMessage(err), [
         { text: "Retry", style: "cancel" },
@@ -590,6 +607,7 @@ export default function ProfileSetupScreen() {
                     onPress={() => {
                       setUploadedFile(null);
                       setCvDocAsset(null);
+                      setUploadedCvId(null);
                     }}
                     hitSlop={10}
                   >
@@ -625,7 +643,9 @@ export default function ProfileSetupScreen() {
                 </View>
               ) : (
                 <>
-                  <Text style={styles.ctaButtonText}>Parse CV & Continue</Text>
+                  <Text style={styles.ctaButtonText}>
+                    {uploadedCvId ? "Retry Analysis & Continue" : "Parse CV & Continue"}
+                  </Text>
                   <Feather name="arrow-right" size={20} color="#FFFFFF" />
                 </>
               )}

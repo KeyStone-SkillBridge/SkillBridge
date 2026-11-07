@@ -24,6 +24,33 @@ const tierFor = (pct) =>
         ? "DEVELOPING"
         : "GETTING STARTED";
 
+// ---- CV display helpers (API CV: { id, fileName, fileType, fileSize, createdAt }) ----
+const formatBytes = (bytes) => {
+  const n = Number(bytes);
+  if (!n || n < 0) return "";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const cvKind = (cv) => {
+  const type = String(cv?.fileType || "").toLowerCase();
+  const name = String(cv?.fileName || "").toLowerCase();
+  if (type.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (type.includes("wordprocessingml") || name.endsWith(".docx")) return "DOCX";
+  if (type.includes("msword") || name.endsWith(".doc")) return "DOC";
+  return "";
+};
+
+const formatDate = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 export default function ProfileScreen() {
   const router = useRouter();
   const { data, stats, loading, refreshing, refresh } = useSkillBridge();
@@ -42,7 +69,16 @@ export default function ProfileScreen() {
     { icon: "phone", label: "Phone", value: profile.phone },
     { icon: "mail", label: "Email", value: data?.me?.email },
   ].filter((d) => d.value);
-  console.log("Profile details:", details);
+
+  const cvMeta = latestCv
+    ? [
+        cvKind(latestCv),
+        formatBytes(latestCv.fileSize),
+        latestCv.createdAt ? `Uploaded ${formatDate(latestCv.createdAt)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -208,8 +244,12 @@ export default function ProfileScreen() {
             <EmptyCard
               icon="award"
               title="No skills on your profile yet"
-              message="Upload your CV and our AI will extract your skills automatically."
-              ctaLabel="Upload CV"
+              message={
+                latestCv
+                  ? "Your CV is uploaded, but no skills have been extracted from it yet. Re-upload it or add your skills in Profile Settings."
+                  : "Upload your CV and our AI will extract your skills automatically."
+              }
+              ctaLabel={latestCv ? "Update CV" : "Upload CV"}
               onPress={() => router.push("/profile-settings")}
             />
           ) : (
@@ -317,10 +357,29 @@ export default function ProfileScreen() {
               <View style={{ flex: 1, marginLeft: 10 }}>
                 <Text style={styles.credTitle}>Profile Details</Text>
                 <Text style={styles.credSub}>
-                  {latestCv ? `CV: ${latestCv.fileName}` : "NO CV UPLOADED"}
+                  {latestCv ? "CV ON FILE" : "NO CV UPLOADED"}
                 </Text>
               </View>
             </View>
+
+            {!!latestCv && (
+              <TouchableOpacity
+                style={styles.cvRow}
+                activeOpacity={0.85}
+                onPress={() => router.push("/profile-settings")}
+              >
+                <View style={styles.cvIconWrap}>
+                  <Feather name="file-text" size={18} color="#731F94" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.cvName} numberOfLines={1}>
+                    {latestCv.fileName || "My CV"}
+                  </Text>
+                  {!!cvMeta && <Text style={styles.cvMeta}>{cvMeta}</Text>}
+                </View>
+                <Feather name="chevron-right" size={16} color="#7B6F84" />
+              </TouchableOpacity>
+            )}
 
             {!!profile.bio && (
               <Text style={styles.detailBio}>{profile.bio}</Text>
@@ -371,6 +430,32 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  cvRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FAF5FC",
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  cvIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cvName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#131B2A",
+  },
+  cvMeta: {
+    fontSize: 11,
+    color: "#556070",
+    marginTop: 2,
+  },
   detailBio: {
     fontSize: 12,
     color: "#3C303B",

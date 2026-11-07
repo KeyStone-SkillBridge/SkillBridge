@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { log, logError } from "./logger";
+
 // ---------------------------------------------------------------------------
 // Session storage — single source of truth for the JWT + cached user/app state
 // ---------------------------------------------------------------------------
@@ -46,9 +48,11 @@ export async function getToken() {
   try {
     memoryToken = sanitizeToken(await AsyncStorage.getItem(TOKEN_KEY));
   } catch (e) {
+    logError("session", "getToken (reading AsyncStorage)", e);
     memoryToken = null;
   }
   memoryLoaded = true;
+  log("session", memoryToken ? "Token loaded from storage" : "No stored token found");
   return memoryToken;
 }
 
@@ -59,9 +63,33 @@ export async function saveSession(token, user) {
   memoryLoaded = true;
   await AsyncStorage.setItem(TOKEN_KEY, clean);
   if (user) await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
+  log("session", "Session saved", { hasUser: !!user });
+}
+
+// Credentials held in memory only, between signup and email verification, so
+// we can log in once the code is confirmed (register/verify-email return no
+// JWT). Never persisted; lost if the app is closed.
+let pendingCredentials = null;
+
+export function setPendingCredentials(email, password) {
+  pendingCredentials = { email, password };
+}
+
+export function getPendingCredentials(email) {
+  if (!pendingCredentials) return null;
+  if (email && pendingCredentials.email !== String(email).trim().toLowerCase()) {
+    return null;
+  }
+  return pendingCredentials;
+}
+
+export function clearPendingCredentials() {
+  pendingCredentials = null;
 }
 
 export async function clearSession() {
+  log("session", "Session cleared");
+  pendingCredentials = null;
   memoryToken = null;
   memoryLoaded = true;
   await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, APP_STATE_KEY]);
@@ -72,6 +100,7 @@ export async function getCachedUser() {
     const raw = await AsyncStorage.getItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
+    logError("session", "getCachedUser", e);
     return null;
   }
 }
@@ -86,6 +115,7 @@ export async function getAppState() {
     const raw = await AsyncStorage.getItem(APP_STATE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch (e) {
+    logError("session", "getAppState", e);
     return {};
   }
 }
