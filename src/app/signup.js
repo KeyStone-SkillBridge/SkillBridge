@@ -74,7 +74,6 @@ export default function SignUpScreen() {
         email: cleanEmail,
         password: password,
         fullName: cleanName,
-        name: cleanName,
       };
 
       log("signup", "Registering account", { email: cleanEmail });
