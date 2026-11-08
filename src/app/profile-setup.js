@@ -245,7 +245,11 @@ export default function ProfileSetupScreen() {
 
         const ar = result.analysisResult || {};
         const summary =
-          ar.summary || ar.experienceSummary || ar.experience || ar.overview;
+          ar.summary ||
+          ar.profile_summary ||
+          ar.experienceSummary ||
+          ar.experience ||
+          ar.overview;
         if (typeof summary === "string" && summary.trim()) {
           setExperienceText(summary.trim());
         }

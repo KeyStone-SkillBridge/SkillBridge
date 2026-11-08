@@ -53,17 +53,24 @@ export const initials = (name) =>
     .join("") || "SB";
 
 // The server's analysisResult is free-form; pull out what the screens show.
+// The live AI answer looks like { profile_summary, current_level,
+// identified_skills[], skill_gaps[], recommended_career_path: { target_role,
+// match_percentage, action_plan[] } }; older/other shapes are still accepted.
 function readAnalysis(gap) {
   const result = gap?.analysisResult || {};
+  const path = result.recommended_career_path || {};
   const score =
     result.matchScore ??
     result.match_score ??
     result.readinessScore ??
     result.readiness ??
     result.score ??
+    path.match_percentage ??
+    path.matchPercentage ??
     null;
   return {
-    summary: result.summary || result.overview || result.feedback || null,
+    summary:
+      result.summary || result.profile_summary || result.overview || result.feedback || null,
     score: typeof score === "number" ? Math.round(score <= 1 ? score * 100 : score) : null,
     strengths: Array.isArray(result.strengths) ? result.strengths : [],
     recommendations: Array.isArray(result.recommendations) ? result.recommendations : [],
