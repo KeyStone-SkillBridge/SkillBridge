@@ -12,29 +12,36 @@ import {
   skillGapService,
   unwrap,
 } from "./endpoints";
-import { getAppState, getCachedUser } from "./session";
 import { logError } from "./logger";
+import { getAppState, getCachedUser } from "./session";
 
-// ---------------------------------------------------------------------------
-// Shared dashboard data. Every tab screen calls useSkillBridge(); data is
-// fetched once, cached in memory, and refreshed when a tab regains focus
+// ===========================================================================
+// Shared dashboard data. Every tab screen calls useSkillBridge(); the data is
+// fetched once, cached in memory, and refreshed when a screen regains focus
 // (if older than STALE_MS) or when the user pulls to refresh.
-// ---------------------------------------------------------------------------
+// ===========================================================================
 const STALE_MS = 30 * 1000;
 
 let cache = null; // { data, fetchedAt }
-let inflight = null;
+let inflight = null; // { promise, generation }
+let generation = 0; // bumps on invalidate, so late results from a previous
+//                     session / account never land in the cache
 const listeners = new Set();
 
+// ---- Small formatting helpers ------------------------------------------------
 const byNewest = (a, b) =>
   new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime();
 
-const norm = (s) => String(s || "").trim().toLowerCase();
+const normalize = (value) => String(value || "").trim().toLowerCase();
 
-export const titleCase = (s) =>
-  String(s || "")
+export const titleCase = (text) =>
+  String(text || "")
     .split(/\s+/)
-    .map((w) => (w.length <= 3 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .map((word) =>
+      word.length <= 3 && word === word.toUpperCase()
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
     .join(" ");
 
 export const initials = (name) =>
@@ -42,78 +49,83 @@ export const initials = (name) =>
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
+    .map((word) => word[0].toUpperCase())
     .join("") || "SB";
 
-// Turn the free-form analysisResult into something displayable.
+// The server's analysisResult is free-form; pull out what the screens show.
 function readAnalysis(gap) {
-  const a = gap?.analysisResult || {};
+  const result = gap?.analysisResult || {};
   const score =
-    a.matchScore ?? a.match_score ?? a.readinessScore ?? a.readiness ?? a.score ?? null;
+    result.matchScore ??
+    result.match_score ??
+    result.readinessScore ??
+    result.readiness ??
+    result.score ??
+    null;
   return {
-    summary: a.summary || a.overview || a.feedback || null,
+    summary: result.summary || result.overview || result.feedback || null,
     score: typeof score === "number" ? Math.round(score <= 1 ? score * 100 : score) : null,
-    strengths: Array.isArray(a.strengths) ? a.strengths : [],
-    recommendations: Array.isArray(a.recommendations) ? a.recommendations : [],
+    strengths: Array.isArray(result.strengths) ? result.strengths : [],
+    recommendations: Array.isArray(result.recommendations) ? result.recommendations : [],
   };
 }
 
+// ---- Fetching ------------------------------------------------------------------
 async function fetchAll() {
-  const [profileR, gapsR, matchesR, roadmapsR, progressR, recsR, cvsR] =
-    await Promise.allSettled([
-      profileService.getMyProfile(),
-      skillGapService.getAll(),
-      matchingService.getSaved(),
-      roadmapService.list(),
-      progressService.list(),
-      recommendationService.getPersonalized(),
-      cvService.getMyCVs(),
-    ]);
+  const results = await Promise.allSettled([
+    profileService.getMyProfile(),
+    skillGapService.getAll(),
+    matchingService.getSaved(),
+    roadmapService.list(),
+    progressService.list(),
+    recommendationService.getPersonalized(),
+    cvService.getMyCVs(),
+  ]);
+  const [profileR, gapsR, matchesR, roadmapsR, progressR, recsR, cvsR] = results;
 
-  const ok = (r) => r.status === "fulfilled";
-  const errors = [profileR, gapsR, matchesR, roadmapsR, progressR, recsR, cvsR]
-    .filter((r) => !ok(r))
-    .map((r) => r.reason);
+  const succeeded = (result) => result.status === "fulfilled";
+  const errors = results.filter((r) => !succeeded(r)).map((r) => r.reason);
+  results.forEach((r) => {
+    if (!succeeded(r)) logError("useSkillBridge", "loading dashboard data", r.reason);
+  });
 
-  const me = ok(profileR) ? unwrap(profileR.value) : await getCachedUser();
+  const me = succeeded(profileR) ? unwrap(profileR.value) : await getCachedUser();
   const profile = me?.profile || null;
-  const skillGaps = ok(gapsR) ? asList(gapsR.value).sort(byNewest) : [];
-  const matches = ok(matchesR)
+  const skillGaps = succeeded(gapsR) ? asList(gapsR.value).sort(byNewest) : [];
+  const matches = succeeded(matchesR)
     ? asList(matchesR.value).sort((a, b) => (b.matchPercentage || 0) - (a.matchPercentage || 0))
     : [];
-  const roadmaps = ok(roadmapsR) ? asList(roadmapsR.value).sort(byNewest) : [];
-  const progress = ok(progressR) ? asList(progressR.value) : [];
-  let recommendations = ok(recsR) ? asList(recsR.value) : [];
-  const cvs = ok(cvsR) ? asList(cvsR.value).sort(byNewest) : [];
+  const roadmaps = succeeded(roadmapsR) ? asList(roadmapsR.value).sort(byNewest) : [];
+  const progress = succeeded(progressR) ? asList(progressR.value) : [];
+  const cvs = succeeded(cvsR) ? asList(cvsR.value).sort(byNewest) : [];
+  let recommendations = succeeded(recsR) ? asList(recsR.value) : [];
 
-  // Personalized can be empty for new users → fall back to the public list.
+  // Personalized recommendations are empty for new users → use the public list.
   if (recommendations.length === 0) {
     try {
       recommendations = asList(await recommendationService.list());
     } catch (e) {
-      logError("useSkillBridge", "load CV list", e);
-      // Public list currently 500s on the server — fine, show empty state.
+      logError("useSkillBridge", "loading public recommendations", e);
     }
   }
 
-  // Load tasks for the most relevant roadmap.
+  // Load the tasks of the most relevant roadmap.
   const appState = await getAppState();
-  const activeRoadmapMeta =
+  const roadmapMeta =
     roadmaps.find((r) => r.id === appState.roadmapId) ||
     roadmaps.find((r) => r.status === "active") ||
     roadmaps[0] ||
     null;
-  let activeRoadmap = activeRoadmapMeta;
-  if (activeRoadmapMeta?.id) {
+  let activeRoadmap = roadmapMeta;
+  if (roadmapMeta?.id) {
     try {
-      activeRoadmap = unwrap(await roadmapService.getById(activeRoadmapMeta.id));
+      activeRoadmap = unwrap(await roadmapService.getById(roadmapMeta.id));
     } catch (e) {
-      logError("useSkillBridge", "load active roadmap", e);
-      // keep meta only
+      logError("useSkillBridge", "loading the active roadmap", e);
     }
   }
 
-  // Prefer the skill gap we created during onboarding, else the newest.
+  // Prefer the skill gap created during onboarding, else the newest completed.
   const latestGap =
     skillGaps.find((g) => g.id === appState.skillGapId) ||
     skillGaps.find((g) => g.status === "completed") ||
@@ -136,32 +148,41 @@ async function fetchAll() {
   };
 }
 
-// ---- Derived values used across screens ----------------------------------
+// ---- Derived values used across screens ------------------------------------------
 export function deriveStats(data) {
   const gap = data?.latestGap;
   const current = Array.isArray(gap?.currentSkills) ? gap.currentSkills : [];
   const required = Array.isArray(gap?.requiredSkills) ? gap.requiredSkills : [];
-  let missing = Array.isArray(gap?.missingSkills) ? gap.missingSkills : null;
-  const currentSet = new Set(current.map(norm));
-  if (!missing) missing = required.filter((s) => !currentSet.has(norm(s)));
-  const matched = required.filter((s) => currentSet.has(norm(s)));
+  const currentSet = new Set(current.map(normalize));
+  const missing = Array.isArray(gap?.missingSkills)
+    ? gap.missingSkills
+    : required.filter((skill) => !currentSet.has(normalize(skill)));
+  const matched = required.filter((skill) => currentSet.has(normalize(skill)));
 
   const analysis = readAnalysis(gap);
   const readiness =
     analysis.score ??
-    (required.length ? Math.round((matched.length / required.length) * 100) : current.length ? 50 : 0);
+    (required.length
+      ? Math.round((matched.length / required.length) * 100)
+      : current.length
+        ? 50
+        : 0);
 
-  // Roadmap tasks
-  const tbp = data?.activeRoadmap?.tasksByPhase || {};
-  const tasks = [...(tbp["30"] || []), ...(tbp["60"] || []), ...(tbp["90"] || [])];
+  // Roadmap tasks, in phase order (the API groups them as "30" / "60" / "90").
+  const byPhase = data?.activeRoadmap?.tasksByPhase || {};
+  const tasks = [...(byPhase["30"] || []), ...(byPhase["60"] || []), ...(byPhase["90"] || [])];
   const doneTasks = tasks.filter((t) => t.status === "done").length;
 
-  const completedProgress = (data?.progress || []).filter((p) => p.status === "completed").length;
-  const inProgress = (data?.progress || []).filter((p) => p.status === "in_progress");
+  const progress = data?.progress || [];
+  const completedProgress = progress.filter((p) => p.status === "completed").length;
+  const inProgress = progress.filter((p) => p.status === "in_progress");
 
   const startDate = data?.activeRoadmap?.startDate || data?.activeRoadmap?.createdAt;
   const dayNumber = startDate
-    ? Math.max(1, Math.min(90, Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1))
+    ? Math.max(
+        1,
+        Math.min(90, Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1),
+      )
     : 1;
 
   const fullName = data?.me?.fullName || "";
@@ -192,25 +213,36 @@ export function deriveStats(data) {
   };
 }
 
+// ---- Cache ----------------------------------------------------------------------
 export async function loadSkillBridge(force = false) {
   if (!force && cache && Date.now() - cache.fetchedAt < STALE_MS) return cache.data;
-  if (inflight) return inflight;
-  inflight = fetchAll()
+
+  // Share a running fetch — but only if it started after the last invalidate,
+  // otherwise it would hand back data from before the change we just made.
+  if (inflight && inflight.generation === generation) return inflight.promise;
+
+  const startedIn = generation;
+  const promise = fetchAll()
     .then((data) => {
-      cache = { data, fetchedAt: Date.now() };
-      listeners.forEach((l) => l(data));
+      if (startedIn === generation) {
+        cache = { data, fetchedAt: Date.now() };
+        listeners.forEach((listener) => listener(data));
+      }
       return data;
     })
     .finally(() => {
-      inflight = null;
+      if (inflight?.promise === promise) inflight = null;
     });
-  return inflight;
+  inflight = { promise, generation: startedIn };
+  return promise;
 }
 
 export function invalidateSkillBridge() {
   cache = null;
+  generation += 1;
 }
 
+// ---- Hook -----------------------------------------------------------------------
 export function useSkillBridge() {
   const [data, setData] = useState(cache?.data || null);
   const [loading, setLoading] = useState(!cache);
@@ -220,19 +252,21 @@ export function useSkillBridge() {
 
   useEffect(() => {
     mounted.current = true;
-    const l = (d) => mounted.current && setData(d);
-    listeners.add(l);
+    const listener = (next) => {
+      if (mounted.current) setData(next);
+    };
+    listeners.add(listener);
     return () => {
       mounted.current = false;
-      listeners.delete(l);
+      listeners.delete(listener);
     };
   }, []);
 
   const load = useCallback(async (force = false) => {
     try {
       setError(null);
-      const d = await loadSkillBridge(force);
-      if (mounted.current) setData(d);
+      const next = await loadSkillBridge(force);
+      if (mounted.current) setData(next);
     } catch (e) {
       logError("useSkillBridge", "refresh data", e);
       if (mounted.current) setError(e);
@@ -253,6 +287,7 @@ export function useSkillBridge() {
     if (mounted.current) setRefreshing(false);
   }, [load]);
 
-  const stats = deriveStats(data);
-  return { data, stats, loading, refreshing, refresh, reload: () => load(true), error };
+  const reload = useCallback(() => load(true), [load]);
+
+  return { data, stats: deriveStats(data), loading, refreshing, refresh, reload, error };
 }

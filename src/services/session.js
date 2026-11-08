@@ -2,39 +2,41 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { log, logError } from "./logger";
 
-// ---------------------------------------------------------------------------
-// Session storage — single source of truth for the JWT + cached user/app state
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Session — the JWT, the cached user and the small bag of app state.
+//
+// The token lives in memory (so every request doesn't wait on AsyncStorage and
+// a token saved a millisecond ago is visible to the next request) and in
+// AsyncStorage (so it survives a restart).
+// ===========================================================================
 export const TOKEN_KEY = "user_token";
 export const USER_KEY = "user_data";
-export const APP_STATE_KEY = "skillbridge_state"; // { cvId, skillGapId, targetRole, roadmapId, careerPaths, onboardingComplete }
+// { cvId, skillGapId, analysisId, targetRole, roadmapId, plannedSkills,
+//   careerPaths, onboardingComplete }
+export const APP_STATE_KEY = "skillbridge_state";
 
-// In-memory copy so every request doesn't wait on AsyncStorage, and so a
-// token saved a millisecond ago is visible immediately to the next request.
-let memoryToken = null;
-let memoryLoaded = false;
-
-// Strip quotes / whitespace / an accidental "Bearer " prefix from a token.
+// ---- Token parsing ---------------------------------------------------------
+// Strip quotes, whitespace and an accidental "Bearer " prefix.
 export function sanitizeToken(raw) {
   if (!raw || typeof raw !== "string") return null;
-  let t = raw.trim();
-  if (t.startsWith('"') && t.endsWith('"')) t = t.slice(1, -1);
-  if (/^bearer\s+/i.test(t)) t = t.replace(/^bearer\s+/i, "");
-  return t || null;
+  let token = raw.trim();
+  if (token.startsWith('"') && token.endsWith('"')) token = token.slice(1, -1);
+  token = token.replace(/^bearer\s+/i, "");
+  return token || null;
 }
 
-// Find the JWT in any reasonable response shape.
-// Live API (POST /api/v1/auth/login) → { success, message, data: { user, token } }
+// POST /api/v1/auth/login → { success, message, data: { user, token } }.
+// Other shapes are accepted too in case the server changes.
 export function extractToken(body) {
   if (!body || typeof body !== "object") return null;
   const candidates = [
-    body?.data?.token,
-    body?.data?.accessToken,
-    body?.data?.access_token,
-    body?.data?.tokens?.accessToken,
-    body?.token,
-    body?.accessToken,
-    body?.access_token,
+    body.data?.token,
+    body.data?.accessToken,
+    body.data?.access_token,
+    body.data?.tokens?.accessToken,
+    body.token,
+    body.accessToken,
+    body.access_token,
   ];
   return sanitizeToken(candidates.find((c) => typeof c === "string" && c));
 }
@@ -43,32 +45,60 @@ export function extractUser(body) {
   return body?.data?.user || body?.user || null;
 }
 
-export async function getToken() {
-  if (memoryLoaded) return memoryToken;
+// ---- Token store -----------------------------------------------------------
+let memoryToken = null;
+let tokenLoaded = false;
+let tokenLoading = null; // shared promise while the first read is in flight
+let sessionVersion = 0; // bumps on every save / clear
+
+async function loadStoredToken() {
+  const versionAtStart = sessionVersion;
+  let stored = null;
   try {
-    memoryToken = sanitizeToken(await AsyncStorage.getItem(TOKEN_KEY));
+    stored = sanitizeToken(await AsyncStorage.getItem(TOKEN_KEY));
   } catch (e) {
-    logError("session", "getToken (reading AsyncStorage)", e);
-    memoryToken = null;
+    logError("session", "reading the stored token", e);
   }
-  memoryLoaded = true;
-  log("session", memoryToken ? "Token loaded from storage" : "No stored token found");
+  // A save or clear that happened while we were reading is newer than what we
+  // just read — it must win.
+  if (sessionVersion === versionAtStart) memoryToken = stored;
+  tokenLoaded = true;
+  tokenLoading = null;
+  log("session", memoryToken ? "Token available" : "No stored token");
+}
+
+export async function getToken() {
+  if (!tokenLoaded) {
+    if (!tokenLoading) tokenLoading = loadStoredToken();
+    await tokenLoading;
+  }
   return memoryToken;
 }
 
 export async function saveSession(token, user) {
   const clean = sanitizeToken(token);
   if (!clean) throw new Error("No authentication token was returned.");
+  sessionVersion += 1;
   memoryToken = clean;
-  memoryLoaded = true;
+  tokenLoaded = true;
   await AsyncStorage.setItem(TOKEN_KEY, clean);
   if (user) await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
   log("session", "Session saved", { hasUser: !!user });
 }
 
-// Credentials held in memory only, between signup and email verification, so
-// we can log in once the code is confirmed (register/verify-email return no
-// JWT). Never persisted; lost if the app is closed.
+export async function clearSession() {
+  sessionVersion += 1;
+  memoryToken = null;
+  tokenLoaded = true;
+  pendingCredentials = null;
+  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, APP_STATE_KEY]);
+  log("session", "Session cleared");
+}
+
+// ---- Credentials between signup and email verification ----------------------
+// register and verify-email return no JWT, so the signup screen keeps the
+// credentials here to log in once the code is confirmed. Memory only: never
+// written to disk, gone when the app closes.
 let pendingCredentials = null;
 
 export function setPendingCredentials(email, password) {
@@ -87,14 +117,7 @@ export function clearPendingCredentials() {
   pendingCredentials = null;
 }
 
-export async function clearSession() {
-  log("session", "Session cleared");
-  pendingCredentials = null;
-  memoryToken = null;
-  memoryLoaded = true;
-  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, APP_STATE_KEY]);
-}
-
+// ---- Cached user -------------------------------------------------------------
 export async function getCachedUser() {
   try {
     const raw = await AsyncStorage.getItem(USER_KEY);
@@ -110,6 +133,7 @@ export async function setCachedUser(user) {
   await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
+// ---- App state ---------------------------------------------------------------
 export async function getAppState() {
   try {
     const raw = await AsyncStorage.getItem(APP_STATE_KEY);
@@ -120,21 +144,30 @@ export async function getAppState() {
   }
 }
 
-export async function updateAppState(patch) {
-  const current = await getAppState();
-  const next = { ...current, ...patch };
-  await AsyncStorage.setItem(APP_STATE_KEY, JSON.stringify(next));
-  return next;
+// Updates are read-modify-write, so run them one at a time — two overlapping
+// updates (for example { cvId } and { skillGapId }) must not overwrite each
+// other.
+let appStateQueue = Promise.resolve();
+
+export function updateAppState(patch) {
+  const run = appStateQueue.then(async () => {
+    const next = { ...(await getAppState()), ...patch };
+    await AsyncStorage.setItem(APP_STATE_KEY, JSON.stringify(next));
+    return next;
+  });
+  appStateQueue = run.catch(() => {});
+  return run;
 }
 
-// ---------------------------------------------------------------------------
-// Unauthorized listener — the root layout registers a handler that sends the
-// user back to /login when the server rejects the token.
-// ---------------------------------------------------------------------------
+// ---- Unauthorized listener ----------------------------------------------------
+// The root layout registers a handler that sends the user to /login when the
+// server rejects the token.
 let unauthorizedHandler = null;
+
 export function setUnauthorizedHandler(fn) {
   unauthorizedHandler = fn;
 }
+
 export function notifyUnauthorized() {
   if (typeof unauthorizedHandler === "function") unauthorizedHandler();
 }
