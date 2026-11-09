@@ -64,6 +64,11 @@ export default function SignUpScreen() {
       setEmailError("Enter a valid email address");
       return;
     }
+    // The API rejects passwords shorter than 8 characters.
+    if (password.length < 8) {
+      Alert.alert("Password too short", "Your password must be at least 8 characters.");
+      return;
+    }
 
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();

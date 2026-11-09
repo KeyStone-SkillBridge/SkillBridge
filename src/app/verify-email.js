@@ -56,11 +56,13 @@ export default function VerifyEmailScreen() {
 
   // Handle digit input & auto-focus shift
   const handleDigitChange = (value, index) => {
+    // The API only accepts a code of exactly six digits.
+    const digit = value.replace(/\D/g, "").slice(-1);
     const newCode = [...code];
-    newCode[index] = value;
+    newCode[index] = digit;
     setCode(newCode);
 
-    if (value && index < 5) {
+    if (digit && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -72,7 +74,7 @@ export default function VerifyEmailScreen() {
   };
 
   const fullCode = code.join("");
-  const isCodeComplete = fullCode.length === 6;
+  const isCodeComplete = /^\d{6}$/.test(fullCode);
 
   // Verify Code Submission
   const handleVerify = async () => {

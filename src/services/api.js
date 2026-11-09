@@ -10,6 +10,11 @@ const REQUEST_TIMEOUT_MS = 15000;
 const UPLOAD_TIMEOUT_MS = 90000;
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
+// The server has been measured crashing on ordinary read routes about half the
+// time (Cloudflare error 1101, answered in ~250ms) and succeeding on the next
+// call, so reads get more, and quicker, retries after a server error.
+const SERVER_ERROR_RETRIES = 3;
+const SERVER_ERROR_RETRY_DELAY_MS = 400;
 // An attempt that took this long without an answer counts as a hang (React
 // Native reports those as a plain "Network Error"). A hang is not retried.
 const HANG_MS = 8000;
@@ -60,9 +65,12 @@ function setAuthorization(config, token) {
   }
 }
 
+const isServerFailure = (error) => [500, 502, 503, 504].includes(error?.response?.status);
+
 function canRetry(error) {
   const config = error?.config;
-  if (!config || (config.__retryCount || 0) >= MAX_RETRIES) return false;
+  const limit = isServerFailure(error) ? SERVER_ERROR_RETRIES : MAX_RETRIES;
+  if (!config || (config.__retryCount || 0) >= limit) return false;
 
   const method = (config.method || "get").toLowerCase();
   const url = config.url || "";
@@ -70,13 +78,17 @@ function canRetry(error) {
   const isRetryableWrite = RETRYABLE_WRITE_PATHS.some((path) => url.includes(path));
   if (!isRead && !isRetryableWrite) return false;
 
-  // No response: the request never reached the server. Retry quick failures
-  // only — if the attempt hung, another one will most likely hang too.
+  // No response at all.
   if (!error.response) {
-    return error.code !== "ECONNABORTED" && waitedMs(config) < HANG_MS;
+    const hung = error.code === "ECONNABORTED" || waitedMs(config) >= HANG_MS;
+    // A quick failure is worth retrying. A hang costs a full timeout, so only
+    // reads (safe to repeat) get one more try; everything else fails at once.
+    if (!hung) return true;
+    return isRead && (config.__retryCount || 0) < 1;
   }
-  // Gateway-style failures on reads are usually transient.
-  return isRead && [502, 503, 504].includes(error.response.status);
+  // The server itself has been seen to fail intermittently (500 / 502 / 503 /
+  // 504) on routes that work moments later, so reads are retried.
+  return isRead && [500, 502, 503, 504].includes(error.response.status);
 }
 
 // Human-readable message from any axios error.
@@ -176,7 +188,8 @@ api.interceptors.response.use(
 
     if (canRetry(error)) {
       config.__retryCount = (config.__retryCount || 0) + 1;
-      const delay = RETRY_DELAY_MS * config.__retryCount;
+      const delay =
+        (isServerFailure(error) ? SERVER_ERROR_RETRY_DELAY_MS : RETRY_DELAY_MS) * config.__retryCount;
       warn("api", `Retrying ${describe(config)} in ${delay}ms (attempt ${config.__retryCount}/${MAX_RETRIES})`);
       await sleep(delay);
       return api.request(config);

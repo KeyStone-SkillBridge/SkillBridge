@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   asList,
   cvService,
+  learningService,
   matchingService,
   profileService,
   progressService,
@@ -93,8 +94,9 @@ async function fetchAll(previous = null) {
     progressService.list(),
     recommendationService.getPersonalized(),
     cvService.getMyCVs(),
+    learningService.getCourses(),
   ]);
-  const [profileR, gapsR, matchesR, roadmapsR, progressR, recsR, cvsR] = results;
+  const [profileR, gapsR, matchesR, roadmapsR, progressR, recsR, cvsR, coursesR] = results;
 
   const succeeded = (result) => result.status === "fulfilled";
   const errors = results.filter((r) => !succeeded(r)).map((r) => r.reason);
@@ -119,6 +121,7 @@ async function fetchAll(previous = null) {
     : previous?.roadmaps || [];
   const progress = succeeded(progressR) ? asList(progressR.value) : previous?.progress || [];
   const cvs = succeeded(cvsR) ? asList(cvsR.value).sort(byNewest) : previous?.cvs || [];
+  const courses = succeeded(coursesR) ? asList(coursesR.value) : previous?.courses || [];
   let recommendations = succeeded(recsR)
     ? asList(recsR.value)
     : previous?.recommendations || [];
@@ -167,6 +170,7 @@ async function fetchAll(previous = null) {
     activeRoadmap,
     progress,
     recommendations,
+    courses,
     cvs,
     appState,
     errors,

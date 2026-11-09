@@ -68,7 +68,9 @@ export async function addSkillToRoadmap(skill, data) {
       title: `Learn ${titleCase(clean)}`.slice(0, 200),
       description: `Close the ${clean} gap for your target role.`,
       taskType: "learn",
-      skill: clean.toLowerCase().slice(0, 100),
+      // Exactly as the skill gap spells it: the API validates a task's skill
+      // against the roadmap's skill-gap (422 "invalid skill-gap association").
+      skill: clean.slice(0, 100),
       status: "todo",
     });
     invalidateSkillBridge();

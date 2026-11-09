@@ -35,7 +35,8 @@ export default function NewPasswordScreen() {
   const [loading, setLoading] = useState(false);
 
   const passwordsMatch = password.length > 0 && password === confirmPassword;
-  const isFormValid = password.length >= 6 && passwordsMatch && !loading;
+  // The API requires at least 8 characters.
+  const isFormValid = password.length >= 8 && passwordsMatch && !loading;
 
   const handleResetPassword = async () => {
     if (!passwordsMatch) {
@@ -107,7 +108,7 @@ export default function NewPasswordScreen() {
             {/* Title */}
             <Text style={styles.title}>Set New Password</Text>
             <Text style={styles.subtitle}>
-              Create a strong password with at least 6 characters.
+              Create a strong password with at least 8 characters.
             </Text>
 
             {/* New Password */}

@@ -22,6 +22,12 @@ import Svg, { Circle } from "react-native-svg";
 import LogoSvg from "../../../assets/images/logo.svg";
 import { EmptyCard, LoadingState } from "../../components/StateViews";
 import { getErrorMessage } from "../../services/api";
+import {
+  courseToItem,
+  itemsMatchingAnySkill,
+  matchItemsToSkill,
+  recommendationToItem,
+} from "../../services/courseMatching";
 import { setLearningProgress, startLearning } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
 import { logError } from "../../services/logger";
@@ -41,8 +47,17 @@ export default function LearnScreen() {
     progressByRec[String(p.recommendationId)] = p;
   });
 
-  const resources = recs.filter((r) => r.type !== "project");
-  const projects = recs.filter((r) => r.type === "project");
+  // Learning content fetched from the backend, matched to the user's skill gaps:
+  //   - recommendations (personalised by the server), shown as they come
+  //   - courses (/learning/courses) that match at least one skill gap
+  const gapSkills = stats.missingSkills;
+  const recItems = recs.map(recommendationToItem);
+  const courseItems = (data?.courses || []).map(courseToItem);
+  const gapCourses = gapSkills.length ? itemsMatchingAnySkill(gapSkills, courseItems) : courseItems;
+  const allItems = [...recItems, ...courseItems];
+
+  const resources = [...recItems.filter((r) => r.type !== "project"), ...gapCourses];
+  const projects = recItems.filter((r) => r.type === "project");
   const visible = activeFilter === "modules" ? resources : projects;
 
   const tracked = progress.length;
@@ -75,10 +90,13 @@ export default function LearnScreen() {
     });
   };
 
-  const searchSkill = (skill) =>
-    openUrl(`https://www.google.com/search?q=${encodeURIComponent(`learn ${skill} free course`)}`);
-
   const handleStart = async (rec) => {
+    // Courses come from /learning/courses; progress tracking only exists for
+    // recommendations, so a course simply opens its link.
+    if (rec.source === "course") {
+      openUrl(rec.url);
+      return;
+    }
     setBusyId(`rec-${rec.id}`);
     try {
       await startLearning(rec.id);
@@ -366,11 +384,11 @@ export default function LearnScreen() {
         {visible.length === 0 ? (
           <EmptyCard
             icon="book-open"
-            title={recs.length ? "Nothing in this category" : "No recommendations yet"}
+            title={resources.length + projects.length ? "Nothing in this category" : "No recommendations yet"}
             message={
-              recs.length
+              resources.length + projects.length
                 ? "Switch tabs to see other resources."
-                : "We're curating resources for your skill gaps. Meanwhile, search for courses on the skills below."
+                : "There are no courses matching your skill gaps yet. New ones are added over time — pull down to refresh."
             }
           />
         ) : (
@@ -434,20 +452,38 @@ export default function LearnScreen() {
           <>
             <Text style={styles.sectionTitle}>Skills To Learn</Text>
             <Text style={styles.sectionSubtitle}>
-              From your skill-gap analysis. Tap a skill to find free courses.
+              From your skill-gap analysis, with the courses we have for each skill.
             </Text>
             <View style={styles.card}>
-              {stats.missingSkills.map((skill) => (
-                <TouchableOpacity
-                  key={skill}
-                  style={styles.checkItemRow}
-                  onPress={() => searchSkill(skill)}
-                >
-                  <MaterialCommunityIcons name="school-outline" size={15} color="#731F94" />
-                  <Text style={styles.checkItemLabel}>{titleCase(skill)}</Text>
-                  <Feather name="external-link" size={13} color="#731F94" />
-                </TouchableOpacity>
-              ))}
+              {stats.missingSkills.map((skill) => {
+                const matches = matchItemsToSkill(skill, allItems);
+                return (
+                  <View key={skill}>
+                    <View style={styles.checkItemRow}>
+                      <MaterialCommunityIcons name="school-outline" size={15} color="#731F94" />
+                      <Text style={styles.checkItemLabel}>{titleCase(skill)}</Text>
+                    </View>
+                    {matches.length === 0 ? (
+                      <Text style={[styles.metaText, { marginLeft: 23, marginBottom: 8 }]}>
+                        No matching courses yet
+                      </Text>
+                    ) : (
+                      matches.map((item) => (
+                        <TouchableOpacity
+                          key={`${item.source}-${item.id}`}
+                          style={{ marginLeft: 23, marginBottom: 8 }}
+                          onPress={() => openUrl(item.url)}
+                        >
+                          <Text style={styles.linkText}>
+                            {item.title}
+                            {item.provider ? ` · ${item.provider}` : ""} →
+                          </Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                );
+              })}
             </View>
           </>
         )}
