@@ -13,16 +13,22 @@ import {
   unwrap,
 } from "./endpoints";
 import { logError } from "./logger";
-import { getAppState, getCachedUser } from "./session";
+import { getAppState, getCachedUser, getToken } from "./session";
 
 // ===========================================================================
 // Shared dashboard data. Every tab screen calls useSkillBridge(); the data is
 // fetched once, cached in memory, and refreshed when a screen regains focus
 // (if older than STALE_MS) or when the user pulls to refresh.
 // ===========================================================================
-const STALE_MS = 30 * 1000;
+const STALE_MS = 2 * 60 * 1000;
+// After a load with failures, retry soon instead of trusting it for STALE_MS.
+const FAILED_STALE_MS = 10 * 1000;
 
-let cache = null; // { data, fetchedAt }
+let cache = null; // { data, staleAt }
+// The last data that loaded, kept across invalidate() so a failed refresh can
+// fall back to it. Tied to the token it was loaded with, so one account's
+// data is never shown to another.
+let lastGood = null; // { token, data }
 let inflight = null; // { promise, generation }
 let generation = 0; // bumps on invalidate, so late results from a previous
 //                     session / account never land in the cache
@@ -78,7 +84,7 @@ function readAnalysis(gap) {
 }
 
 // ---- Fetching ------------------------------------------------------------------
-async function fetchAll() {
+async function fetchAll(previous = null) {
   const results = await Promise.allSettled([
     profileService.getMyProfile(),
     skillGapService.getAll(),
@@ -96,16 +102,26 @@ async function fetchAll() {
     if (!succeeded(r)) logError("useSkillBridge", "loading dashboard data", r.reason);
   });
 
-  const me = succeeded(profileR) ? unwrap(profileR.value) : await getCachedUser();
+  // A section that failed to load keeps its last good value (`previous`) rather
+  // than going blank — a dropped connection must not wipe what is on screen.
+  const me = succeeded(profileR)
+    ? unwrap(profileR.value)
+    : previous?.me || (await getCachedUser());
   const profile = me?.profile || null;
-  const skillGaps = succeeded(gapsR) ? asList(gapsR.value).sort(byNewest) : [];
+  const skillGaps = succeeded(gapsR)
+    ? asList(gapsR.value).sort(byNewest)
+    : previous?.skillGaps || [];
   const matches = succeeded(matchesR)
     ? asList(matchesR.value).sort((a, b) => (b.matchPercentage || 0) - (a.matchPercentage || 0))
-    : [];
-  const roadmaps = succeeded(roadmapsR) ? asList(roadmapsR.value).sort(byNewest) : [];
-  const progress = succeeded(progressR) ? asList(progressR.value) : [];
-  const cvs = succeeded(cvsR) ? asList(cvsR.value).sort(byNewest) : [];
-  let recommendations = succeeded(recsR) ? asList(recsR.value) : [];
+    : previous?.matches || [];
+  const roadmaps = succeeded(roadmapsR)
+    ? asList(roadmapsR.value).sort(byNewest)
+    : previous?.roadmaps || [];
+  const progress = succeeded(progressR) ? asList(progressR.value) : previous?.progress || [];
+  const cvs = succeeded(cvsR) ? asList(cvsR.value).sort(byNewest) : previous?.cvs || [];
+  let recommendations = succeeded(recsR)
+    ? asList(recsR.value)
+    : previous?.recommendations || [];
 
   // Personalized recommendations are empty for new users → use the public list.
   if (recommendations.length === 0) {
@@ -129,6 +145,8 @@ async function fetchAll() {
       activeRoadmap = unwrap(await roadmapService.getById(roadmapMeta.id));
     } catch (e) {
       logError("useSkillBridge", "loading the active roadmap", e);
+      // Keep the tasks we already had for this roadmap.
+      if (previous?.activeRoadmap?.id === roadmapMeta.id) activeRoadmap = previous.activeRoadmap;
     }
   }
 
@@ -152,6 +170,7 @@ async function fetchAll() {
     cvs,
     appState,
     errors,
+    anyLoaded: errors.length < results.length,
   };
 }
 
@@ -222,17 +241,27 @@ export function deriveStats(data) {
 
 // ---- Cache ----------------------------------------------------------------------
 export async function loadSkillBridge(force = false) {
-  if (!force && cache && Date.now() - cache.fetchedAt < STALE_MS) return cache.data;
+  if (!force && cache && Date.now() < cache.staleAt) return cache.data;
 
   // Share a running fetch — but only if it started after the last invalidate,
   // otherwise it would hand back data from before the change we just made.
   if (inflight && inflight.generation === generation) return inflight.promise;
 
   const startedIn = generation;
-  const promise = fetchAll()
+  const promise = (async () => {
+    // Fall back to the last good data — but only for the same signed-in user.
+    const token = await getToken();
+    const previous = lastGood && lastGood.token === token ? lastGood.data : null;
+    const data = await fetchAll(previous);
+    // Only remember a load that got something; an all-failed load just echoes
+    // `previous` and must not replace it.
+    if (data.anyLoaded) lastGood = { token, data };
+    return data;
+  })()
     .then((data) => {
       if (startedIn === generation) {
-        cache = { data, fetchedAt: Date.now() };
+        const failed = data.errors.length > 0;
+        cache = { data, staleAt: Date.now() + (failed ? FAILED_STALE_MS : STALE_MS) };
         listeners.forEach((listener) => listener(data));
       }
       return data;
