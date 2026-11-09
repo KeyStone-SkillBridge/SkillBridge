@@ -67,7 +67,7 @@ export default function SkillGapScreen() {
         "Added to your plan",
         savedTo === "roadmap"
           ? `"${titleCase(skill)}" was added to the first 30 days of your roadmap.`
-          : `"${titleCase(skill)}" was saved to your plan. It will appear on your Roadmap tab.`,
+          : `"${titleCase(skill)}" was saved to your plan. Your 90-day roadmap hasn't been generated yet, so it is listed under "Your Skill Plan" on the Roadmap tab.`,
       );
     } catch (err) {
       logError("skills", "handleAddToRoadmap", err);

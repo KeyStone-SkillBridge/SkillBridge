@@ -41,9 +41,16 @@ export async function generateRoadmap(skillGapId) {
     return roadmap;
   } catch (err) {
     logError("skillActions", "generate roadmap", err);
-    if (err?.response?.status === 503) {
+    const status = err?.response?.status;
+    if (status === 503) {
       err.userMessage =
         "AI roadmap generation isn't switched on for the server yet. Your gaps have been saved to your plan instead.";
+    } else if (status >= 500) {
+      // Keep the server's own wording so it can be reported to the backend.
+      const serverMessage = err?.response?.data?.message;
+      err.userMessage =
+        `The roadmap service had a problem on the server${serverMessage ? ` ("${serverMessage}")` : ""} (error ${status}). ` +
+        "This isn't caused by your account or your CV. Your skill gaps are still listed under \"Your Skill Plan\".";
     }
     throw err;
   }

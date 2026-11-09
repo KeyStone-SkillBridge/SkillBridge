@@ -39,6 +39,10 @@ const FILTERS = [
   { key: "Remote", icon: "home", label: "Hybrid / Remote" },
 ];
 
+// Active opportunities, optionally filtered by a search term.
+const fetchOpportunities = (q) =>
+  opportunityService.list({ q: q || undefined, status: "active", limit: 30 });
+
 const formatDate = (d) => {
   if (!d) return "Open";
   const date = new Date(d);
@@ -51,7 +55,8 @@ export default function JobsScreen() {
   const [activeFilter, setActiveFilter] = useState("All");
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
+  const [searching, setSearching] = useState(true); // the first load starts on mount
+  const [searchFailed, setSearchFailed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [bookmarks, setBookmarks] = useState({});
@@ -62,27 +67,43 @@ export default function JobsScreen() {
       .catch((e) => logError("jobs", "load bookmarks", e));
   }, []);
 
-  const runSearch = useCallback(async (q) => {
-    setSearching(true);
-    try {
-      const res = await opportunityService.list({
-        q: q || undefined,
-        status: "active",
-        limit: 30,
-      });
-      setSearchResults(asList(res));
-    } catch (err) {
-      logError("jobs", "runSearch", err);
-      if (err?.response?.status !== 401) setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
+  const onSearchResults = useCallback((res) => {
+    setSearchResults(asList(res));
+    setSearchFailed(false);
+    setSearching(false);
   }, []);
 
-  // Initial browse list (for users who don't have matches yet)
+  const onSearchError = useCallback((err) => {
+    logError("jobs", "runSearch", err);
+    // Keep whatever is already listed; just flag that this attempt failed so
+    // the screen doesn't claim there are no roles.
+    if (err?.response?.status !== 401) setSearchFailed(true);
+    setSearching(false);
+  }, []);
+
+  // Search started by the user (search box, retry, pull to refresh).
+  const runSearch = useCallback(
+    (q) => {
+      setSearching(true);
+      setSearchFailed(false);
+      return fetchOpportunities(q).then(onSearchResults, onSearchError);
+    },
+    [onSearchResults, onSearchError],
+  );
+
+  // Initial browse list (for users who don't have matches yet). `searching`
+  // starts as true, so nothing needs setting before the request goes out, and
+  // state is only updated once the request has answered.
   useEffect(() => {
-    runSearch("");
-  }, [runSearch]);
+    let active = true;
+    fetchOpportunities("").then(
+      (res) => active && onSearchResults(res),
+      (err) => active && onSearchError(err),
+    );
+    return () => {
+      active = false;
+    };
+  }, [onSearchResults, onSearchError]);
 
   // Merge matches (with %) and plain opportunities into one list of rows.
   const rows = useMemo(() => {
@@ -121,6 +142,23 @@ export default function JobsScreen() {
     }
   };
 
+  // The server answers 400 until the user has a *completed* skill-gap analysis
+  // with skills in it. Say which part is actually missing.
+  const matchErrorMessage = (err) => {
+    const serverMessage = getErrorMessage(err);
+    if (err?.response?.status !== 400) return serverMessage;
+
+    const hasCv = (data?.cvs || []).length > 0;
+    const hasCompletedGap = (data?.skillGaps || []).some(
+      (g) => g.status === "completed" && (g.currentSkills || []).length > 0,
+    );
+    if (hasCompletedGap) return serverMessage;
+    if (hasCv) {
+      return `Your CV is uploaded, but its skill analysis hasn't completed yet. Open Profile Settings and tap "Re-run analysis", then try again.\n\nServer said: ${serverMessage}`;
+    }
+    return `You need a completed skill-gap analysis first. Upload your CV from profile setup.\n\nServer said: ${serverMessage}`;
+  };
+
   const handleGenerate = async () => {
     setGenerating(true);
     try {
@@ -129,12 +167,7 @@ export default function JobsScreen() {
       await reload();
     } catch (err) {
       logError("jobs", "handleGenerate", err);
-      Alert.alert(
-        "Couldn't generate matches",
-        err?.response?.status === 400
-          ? "You need a completed skill-gap analysis first. Upload your CV from profile setup."
-          : getErrorMessage(err),
-      );
+      Alert.alert("Couldn't generate matches", matchErrorMessage(err));
     } finally {
       setGenerating(false);
     }
@@ -317,13 +350,19 @@ export default function JobsScreen() {
 
         {!featured ? (
           <EmptyCard
-            icon="briefcase"
-            title={searching ? "Searching..." : "No roles found"}
-            message={
-              query
-                ? "Try a different search term or filter."
-                : "New opportunities are added regularly. Pull down to refresh."
+            icon={searchFailed ? "wifi-off" : "briefcase"}
+            title={
+              searching ? "Searching..." : searchFailed ? "Couldn't load roles" : "No roles found"
             }
+            message={
+              searchFailed
+                ? "We couldn't reach the server. Check your connection and try again."
+                : query
+                  ? "Try a different search term or filter."
+                  : "New opportunities are added regularly. Pull down to refresh."
+            }
+            ctaLabel={searchFailed && !searching ? "Try again" : undefined}
+            onPress={() => runSearch(query.trim())}
           />
         ) : (
         /* ================= Featured Main Job Card ================= */
