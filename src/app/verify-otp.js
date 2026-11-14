@@ -21,6 +21,7 @@ import LogoSvg from "../../assets/images/logo.svg";
 import { getErrorMessage } from "../services/api";
 import { authService } from "../services/endpoints";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function VerifyOtpScreen() {
   const router = useRouter();
@@ -71,7 +72,7 @@ export default function VerifyOtpScreen() {
   const isCodeComplete = /^\d{6}$/.test(fullCode);
 
   // Verify Code Submission
-  const handleVerify = async () => {
+  const handleVerify = useSingleFlight(async () => {
     if (!isCodeComplete) {
       Alert.alert(
         "Invalid Code",
@@ -101,10 +102,10 @@ export default function VerifyOtpScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleVerify");
 
   // Resend Verification Code
-  const handleResend = async () => {
+  const handleResend = useSingleFlight(async () => {
     if (timer > 0) return;
 
     setResending(true);
@@ -124,7 +125,7 @@ export default function VerifyOtpScreen() {
     } finally {
       setResending(false);
     }
-  };
+  }, "handleResend");
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

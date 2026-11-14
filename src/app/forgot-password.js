@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import LogoSvg from "../../assets/images/logo.svg";
 import { authService } from "../services/endpoints";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -40,7 +41,7 @@ export default function ForgotPasswordScreen() {
     }
   };
 
-  const handleSendCode = async () => {
+  const handleSendCode = useSingleFlight(async () => {
     if (!email || emailError) {
       setEmailError("Enter a valid email address");
       return;
@@ -72,7 +73,7 @@ export default function ForgotPasswordScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleSendCode");
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

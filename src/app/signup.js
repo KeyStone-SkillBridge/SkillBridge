@@ -29,6 +29,7 @@ import {
   saveSession,
   setPendingCredentials,
 } from "../services/session";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -59,7 +60,7 @@ export default function SignUpScreen() {
     }
   };
 
-  const handleNext = async () => {
+  const handleNext = useSingleFlight(async () => {
     if (!email || emailError) {
       setEmailError("Enter a valid email address");
       return;
@@ -120,7 +121,7 @@ export default function SignUpScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleNext");
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

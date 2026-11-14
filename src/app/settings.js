@@ -21,6 +21,7 @@ import { userService } from "../services/endpoints";
 import { clearSession } from "../services/session";
 import { invalidateSkillBridge } from "../services/useSkillBridge";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -39,7 +40,7 @@ export default function SettingsScreen() {
 
   const [deleting, setDeleting] = useState(false);
 
-  const confirmDeleteAccount = async () => {
+  const confirmDeleteAccount = useSingleFlight(async () => {
     if (deletePassword.trim().toUpperCase() !== "DELETE") {
       Alert.alert("Confirm deletion", 'Type DELETE to permanently delete your account.');
       return;
@@ -64,7 +65,7 @@ export default function SettingsScreen() {
     invalidateSkillBridge();
     await AsyncStorage.clear();
     router.replace("/onboarding");
-  };
+  }, "confirmDeleteAccount");
 
   return (
     <SafeAreaView style={styles.safeArea}>

@@ -24,6 +24,7 @@ import {
 import { getAppState, updateAppState } from "../services/session";
 import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 const toPath = (match) => {
   const opp = match.opportunity || match;
@@ -144,7 +145,7 @@ export default function CareerPathScreen() {
 
   const hasSelection = careerPaths.some((item) => item.selected);
 
-  const handleConfirm = async () => {
+  const handleConfirm = useSingleFlight(async () => {
     if (!hasSelection || saving) return;
     setSaving(true);
     try {
@@ -162,7 +163,7 @@ export default function CareerPathScreen() {
     } finally {
       setSaving(false);
     }
-  };
+  }, "handleConfirm");
 
   return (
     <SafeAreaView style={styles.safeArea}>

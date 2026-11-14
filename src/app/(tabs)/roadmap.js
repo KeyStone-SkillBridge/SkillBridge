@@ -28,6 +28,7 @@ import { getAppState, updateAppState } from "../../services/session";
 import { cycleTaskStatus, generateRoadmap } from "../../services/skillActions";
 import { titleCase, useSkillBridge } from "../../services/useSkillBridge";
 import { logError } from "../../services/logger";
+import { useSingleFlight } from "../../services/singleFlight";
 
 const COACH_AVATAR = require("../../../assets/images/TundeAlabi.png"); // Points to your downloaded coach image asset
 
@@ -92,7 +93,7 @@ export default function RoadmapScreen() {
       ? `"Close ${stats.missingSkills.length} gap${stats.missingSkills.length > 1 ? "s" : ""} to be job-ready."`
       : '"Let\'s build your plan."';
 
-  const handleGenerate = async () => {
+  const handleGenerate = useSingleFlight(async () => {
     setGenerating(true);
     try {
       await generateRoadmap(data?.latestGap?.id);
@@ -104,7 +105,7 @@ export default function RoadmapScreen() {
     } finally {
       setGenerating(false);
     }
-  };
+  }, "handleGenerate");
 
   const handleTaskPress = async (task) => {
     if (!roadmap?.id) return;

@@ -24,6 +24,7 @@ import { getErrorMessage } from "../services/api";
 import { asList, authService, skillGapService } from "../services/endpoints";
 import { invalidateSkillBridge } from "../services/useSkillBridge";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export default function LoginScreen() {
     }
   };
 
-  const handleLogin = async () => {
+  const handleLogin = useSingleFlight(async () => {
     console.log("Attempting login with email:", email);
     if (!email || emailError) {
       setEmailError("Enter a valid email address");
@@ -97,7 +98,7 @@ export default function LoginScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleLogin");
 
   const handleGoogleLogin = () => {
     Alert.alert("Google Sign In", "Connecting Google OAuth service...");

@@ -24,6 +24,7 @@ import { getErrorMessage } from "../../services/api";
 import { asList, matchingService, opportunityService } from "../../services/endpoints";
 import { initials, invalidateSkillBridge, titleCase, useSkillBridge } from "../../services/useSkillBridge";
 import { logError } from "../../services/logger";
+import { useSingleFlight } from "../../services/singleFlight";
 
 const BOOKMARKS_KEY = "skillbridge_bookmarks";
 const TYPE_LABEL = {
@@ -159,7 +160,7 @@ export default function JobsScreen() {
     return `You need a completed skill-gap analysis first. Upload your CV from profile setup.\n\nServer said: ${serverMessage}`;
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = useSingleFlight(async () => {
     setGenerating(true);
     try {
       await matchingService.generate();
@@ -171,7 +172,7 @@ export default function JobsScreen() {
     } finally {
       setGenerating(false);
     }
-  };
+  }, "handleGenerate");
 
   const apply = (opp) => {
     if (!opp?.applicationUrl) {

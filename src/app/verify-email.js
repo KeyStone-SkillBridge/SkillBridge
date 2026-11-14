@@ -28,6 +28,7 @@ import {
   getPendingCredentials,
   saveSession,
 } from "../services/session";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
@@ -77,7 +78,7 @@ export default function VerifyEmailScreen() {
   const isCodeComplete = /^\d{6}$/.test(fullCode);
 
   // Verify Code Submission
-  const handleVerify = async () => {
+  const handleVerify = useSingleFlight(async () => {
     if (!isCodeComplete) {
       Alert.alert(
         "Invalid Code",
@@ -143,10 +144,10 @@ export default function VerifyEmailScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleVerify");
 
   // Resend Verification Code Placeholder
-  const handleResend = async () => {
+  const handleResend = useSingleFlight(async () => {
     if (timer > 0) return;
 
     setResending(true);
@@ -167,7 +168,7 @@ export default function VerifyEmailScreen() {
     } finally {
       setResending(false);
     }
-  };
+  }, "handleResend");
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

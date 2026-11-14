@@ -33,6 +33,7 @@ import {
 import { getAppState, setCachedUser, updateAppState } from "../services/session";
 import { initials, invalidateSkillBridge, useSkillBridge } from "../services/useSkillBridge";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 const FIELDS = [
   { key: "fullName", label: "Full Name", placeholder: "Your full name" },
@@ -106,7 +107,7 @@ export default function ProfileScreen() {
   );
   const nextHint = completionChecks.find((c) => !c.ok)?.hint;
 
-  const handleSave = async () => {
+  const handleSave = useSingleFlight(async () => {
     if (!form.fullName?.trim()) {
       Alert.alert("Name required", "Please enter your full name.");
       return;
@@ -133,9 +134,23 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
     }
+  }, "handleSave");
+
+  // Ask the AI to analyse the CV again (no re-upload needed).
+  const runAnalysis = async (cvId) => {
+    const state = await getAppState();
+    const target = profile.careerGoal || state.targetRole || stats.targetRole || undefined;
+    const analysis = unwrap(
+      await cvService.analyzeCV(cvId, {
+        targetJobTitle: target ? String(target).split(" / ")[0].slice(0, 120) : undefined,
+        careerStage: "Entry",
+        primaryGoal: "Gap Analysis",
+      }),
+    );
+    if (analysis?.skillGapId) await updateAppState({ skillGapId: analysis.skillGapId });
   };
 
-  const handlePickDocument = async () => {
+  const handlePickDocument = useSingleFlight(async () => {
     let file;
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -192,23 +207,9 @@ export default function ProfileScreen() {
     } finally {
       setCvBusy("");
     }
-  };
+  }, "handlePickDocument");
 
-  // Ask the AI to analyse the CV again (no re-upload needed).
-  const runAnalysis = async (cvId) => {
-    const state = await getAppState();
-    const target = profile.careerGoal || state.targetRole || stats.targetRole || undefined;
-    const analysis = unwrap(
-      await cvService.analyzeCV(cvId, {
-        targetJobTitle: target ? String(target).split(" / ")[0].slice(0, 120) : undefined,
-        careerStage: "Entry",
-        primaryGoal: "Gap Analysis",
-      }),
-    );
-    if (analysis?.skillGapId) await updateAppState({ skillGapId: analysis.skillGapId });
-  };
-
-  const handleReanalyze = async () => {
+  const handleReanalyze = useSingleFlight(async () => {
     if (!activeCv?.id || cvBusy) return;
     try {
       setCvBusy("Re-analysing skills...");
@@ -223,7 +224,7 @@ export default function ProfileScreen() {
     } finally {
       setCvBusy("");
     }
-  };
+  }, "handleReanalyze");
 
   return (
     <SafeAreaView style={styles.safeArea}>

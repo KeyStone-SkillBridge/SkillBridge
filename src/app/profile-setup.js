@@ -28,6 +28,7 @@ import {
 import { getAppState, getToken, updateAppState } from "../services/session";
 import { invalidateSkillBridge, titleCase } from "../services/useSkillBridge";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 const EXPERIENCE_OPTIONS = ["0–1 yrs", "1–3 yrs", "3–5 yrs", "5+ yrs"];
 const STATUS_OPTIONS = [
@@ -153,7 +154,7 @@ export default function ProfileSetupScreen() {
     return true;
   };
 
-  const handleNext = async () => {
+  const handleNext = useSingleFlight(async () => {
     if (currentStep === 1) {
       if (!targetRole.trim()) {
         Alert.alert(
@@ -359,7 +360,7 @@ export default function ProfileSetupScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleNext");
 
   return (
     <SafeAreaView style={styles.safeArea}>

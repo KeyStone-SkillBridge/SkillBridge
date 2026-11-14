@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import LogoSvg from "../../assets/images/logo.svg";
 import { authService } from "../services/endpoints";
 import { logError } from "../services/logger";
+import { useSingleFlight } from "../services/singleFlight";
 
 export default function NewPasswordScreen() {
   const router = useRouter();
@@ -38,7 +39,7 @@ export default function NewPasswordScreen() {
   // The API requires at least 8 characters.
   const isFormValid = password.length >= 8 && passwordsMatch && !loading;
 
-  const handleResetPassword = async () => {
+  const handleResetPassword = useSingleFlight(async () => {
     if (!passwordsMatch) {
       Alert.alert("Password Mismatch", "The passwords do not match.");
       return;
@@ -75,7 +76,7 @@ export default function NewPasswordScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, "handleResetPassword");
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

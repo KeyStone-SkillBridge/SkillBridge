@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { classifyFailure, reportConnectivityProblem } from "./connectivity";
 import { log, logError, warn } from "./logger";
 import { clearSession, getToken, notifyUnauthorized } from "./session";
 
@@ -24,14 +25,14 @@ const HANG_MS = 8000;
 const PUBLIC_PATHS = ["/api/v1/auth/"];
 const isPublic = (url = "") => PUBLIC_PATHS.some((path) => url.includes(path));
 
-// Writes that are safe to repeat. Registration, uploads and other writes are
-// never retried — repeating them could create duplicates.
-const RETRYABLE_WRITE_PATHS = [
-  "/api/v1/auth/login",
-  "/api/v1/auth/verify-email",
-  "/api/v1/auth/verify-reset-code",
-  "/api/v1/auth/forgot-password",
-];
+// Writes that are safe to repeat. Only login qualifies. Everything else is
+// never retried automatically:
+//   - register, uploads and other writes could create duplicates;
+//   - verify-email / verify-reset-code use up a one-time code (and count
+//     against an attempt limit), so a repeat can fail after the first attempt
+//     actually succeeded;
+//   - forgot-password would send the user several emails.
+const RETRYABLE_WRITE_PATHS = ["/api/v1/auth/login"];
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -190,7 +191,8 @@ api.interceptors.response.use(
       config.__retryCount = (config.__retryCount || 0) + 1;
       const delay =
         (isServerFailure(error) ? SERVER_ERROR_RETRY_DELAY_MS : RETRY_DELAY_MS) * config.__retryCount;
-      warn("api", `Retrying ${describe(config)} in ${delay}ms (attempt ${config.__retryCount}/${MAX_RETRIES})`);
+      const limit = isServerFailure(error) ? SERVER_ERROR_RETRIES : MAX_RETRIES;
+      warn("api", `Retrying ${describe(config)} in ${delay}ms (attempt ${config.__retryCount}/${limit})`);
       await sleep(delay);
       return api.request(config);
     }
@@ -206,6 +208,13 @@ api.interceptors.response.use(
 
     if (status === 401 && !isPublic(config?.url)) {
       await handleRejectedToken(config);
+    }
+
+    // Reads run in the background (dashboard, lists), so nothing else would
+    // tell the user why data is missing. Writes show their own alert from the
+    // screen that started them.
+    if ((config?.method || "get").toLowerCase() === "get") {
+      reportConnectivityProblem(classifyFailure(error));
     }
     return Promise.reject(error);
   },
